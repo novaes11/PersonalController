@@ -1,0 +1,28 @@
+{
+  "name": "personalcontroller",
+  "version": "1.0.0",
+  "description": "Repositório para testes e experimentos utilizando a biblioteca/framework **ai-agents-core**.",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/novaes11/ai-agents-core-test.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/novaes11/ai-agents-core-test/issues"
+  },
+  "homepage": "https://github.com/novaes11/ai-agents-core-test#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "jest": "^30.5.2",
+    "supertest": "^7.3.1"
+  }
+}
