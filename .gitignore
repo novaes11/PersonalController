@@ -10,7 +10,20 @@ __pycache__/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 .env.local
+
+# Secrets / credenciais
+*.pem
+*.key
+*.p12
+service-account*.json
+.supabase/
+supabase/.temp/
+
+# Test coverage
+coverage/
 
 # OS files
 .DS_Store
