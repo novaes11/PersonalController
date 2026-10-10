@@ -1,0 +1,47 @@
+#!/bin/sh
+# Pre-commit: bloqueia commit de arquivos .env e de padrões comuns de secrets.
+# Ativação (uma vez por clone):  git config core.hooksPath .githooks
+# Falso positivo pontual: adicione o comentário "allowlist-secret" na linha.
+# Bypass de emergência (evite): git commit --no-verify
+
+RED='\033[0;31m'
+NC='\033[0m'
+fail=0
+
+# 1) Arquivos .env nunca podem ser commitados (exceto *.example)
+for f in $(git diff --cached --name-only --diff-filter=ACM); do
+  base=$(basename "$f")
+  case "$base" in
+    *.example) ;;
+    .env|.env.*)
+      printf "${RED}[BLOQUEADO]${NC} arquivo de ambiente staged: %s\n" "$f"
+      fail=1
+      ;;
+  esac
+done
+
+# 2) Escaneia apenas as linhas ADICIONADAS no diff staged
+added=$(git diff --cached -U0 --diff-filter=ACM \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | grep -v 'allowlist-secret')
+
+check() {
+  desc="$1"; pattern="$2"; flags="$3"
+  hits=$(printf '%s\n' "$added" | grep $flags -E -- "$pattern" | head -3)
+  if [ -n "$hits" ]; then
+    printf "${RED}[BLOQUEADO]${NC} possível secret — %s\n" "$desc"
+    printf '%s\n' "$hits" | cut -c1-80 | sed 's/^/    /'
+    fail=1
+  fi
+}
+
+check "AWS Access Key"        'AKIA[0-9A-Z]{16}' ""
+check "Google API Key"        'AIza[0-9A-Za-z_-]{35}' ""
+check "Chave privada (PEM)"   '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' ""
+check "JWT (ex.: Supabase anon/service_role)" 'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}' ""
+check "Atribuição de secret hardcoded" '(secret|token|password|passwd|api_?key|service_role_key)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*["'"'"']?[A-Za-z0-9/+_.-]{16,}' "-i"
+
+if [ "$fail" -ne 0 ]; then
+  printf "\n${RED}Commit abortado.${NC} Remova o secret, use variáveis de ambiente (.env) e, se já vazou, ROTACIONE a chave.\n"
+  exit 1
+fi
+exit 0
