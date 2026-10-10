@@ -22,6 +22,9 @@ service-account*.json
 .supabase/
 supabase/.temp/
 
+# External / embedded local test repositories
+ai-agents-core/
+
 # Test coverage
 coverage/
 

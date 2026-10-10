@@ -1,23 +1,32 @@
 {
   "name": "personalcontroller",
   "version": "1.0.0",
-  "description": "Repositório para testes e experimentos utilizando a biblioteca/framework **ai-agents-core**.",
-  "main": "index.js",
+  "description": "Plataforma de gestão financeira pessoal e acompanhamento de carteira de investimentos (B3, Cripto e Câmbio).",
+  "main": "server.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "start": "node server.js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/novaes11/ai-agents-core-test.git"
+    "url": "git+https://github.com/novaes11/PersonalController.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "finance",
+    "dashboard",
+    "personal-finance",
+    "investments",
+    "supabase",
+    "fastapi",
+    "react"
+  ],
+  "author": "João Vitor Novaes",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/novaes11/ai-agents-core-test/issues"
+    "url": "https://github.com/novaes11/PersonalController/issues"
   },
-  "homepage": "https://github.com/novaes11/ai-agents-core-test#readme",
+  "homepage": "https://github.com/novaes11/PersonalController#readme",
   "dependencies": {
     "express": "^5.2.1"
   },
