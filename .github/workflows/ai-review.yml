@@ -21,13 +21,15 @@ jobs:
 
       - name: Resolve Notion Task ID
         id: resolve_task
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          INPUT_TASK_ID: ${{ github.event.inputs.notion_task_id }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TASK_ID="${{ github.event.inputs.notion_task_id }}"
+            TASK_ID="$INPUT_TASK_ID"
           else
-            # Tenta extrair o ID do Notion (UUID de 32 chars) da descrição do PR
-            BODY="${{ github.event.pull_request.body }}"
-            TASK_ID=$(echo "$BODY" | grep -oE '[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}|[a-f0-9]{32}' | head -n 1 | tr -d '-' || true)
+            # Tenta extrair o ID do Notion (UUID de 32 chars) da descrição do PR de forma segura
+            TASK_ID=$(printf '%s' "$PR_BODY" | grep -oE '[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}|[a-f0-9]{32}' | head -n 1 | tr -d '-' || true)
           fi
 
           if [ -n "$TASK_ID" ]; then
