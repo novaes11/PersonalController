@@ -1,22 +1,49 @@
-name: AI Squad Review
+name: AI Squad Orchestrator
 
 on:
+  workflow_dispatch:
+    inputs:
+      notion_task_id:
+        description: 'ID ou URL da Tarefa do Notion'
+        required: true
   pull_request:
     types: [opened, synchronize]
 
 jobs:
-  review:
+  squad:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Resolve Notion Task ID
+        id: resolve_task
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TASK_ID="${{ github.event.inputs.notion_task_id }}"
+          else
+            # Tenta extrair o ID do Notion (UUID de 32 chars) da descrição do PR
+            BODY="${{ github.event.pull_request.body }}"
+            TASK_ID=$(echo "$BODY" | grep -oE '[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}|[a-f0-9]{32}' | head -n 1 | tr -d '-' || true)
+          fi
+
+          if [ -n "$TASK_ID" ]; then
+            echo "task_id=$TASK_ID" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "Notion Task ID detectado: $TASK_ID"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "Nenhum Notion Task ID informado no PR. Pulando execucao do Squad."
+          fi
+
       - name: Run AI Agents Core
-        uses: ./ai-agents-core
+        if: steps.resolve_task.outputs.found == 'true'
+        uses: novaes11/ai-agents-core@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          pr_number: ${{ github.event.pull_request.number }}
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          notion_api_key: ${{ secrets.NOTION_API_KEY }}
+          notion_task_id: ${{ steps.resolve_task.outputs.task_id }}
