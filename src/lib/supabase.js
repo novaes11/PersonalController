@@ -1,7 +1,18 @@
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
 
 const supabaseUrl = process.env.SUPABASE_URL || 'https://whnxqubvxgjuinvrjheg.supabase.co';
 const supabaseKey = process.env.SUPABASE_ANON_KEY || 'dummy_anon_key';
+
+const clientOptions = {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false
+  },
+  realtime: {
+    transport: WebSocket
+  }
+};
 
 /**
  * Cria ou recupera o cliente Supabase.
@@ -14,6 +25,7 @@ function getSupabaseClient(req) {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const jwt = authHeader.slice(7);
     return createClient(supabaseUrl, supabaseKey, {
+      ...clientOptions,
       global: {
         headers: {
           Authorization: `Bearer ${jwt}`
@@ -22,10 +34,10 @@ function getSupabaseClient(req) {
     });
   }
 
-  return createClient(supabaseUrl, supabaseKey);
+  return createClient(supabaseUrl, supabaseKey, clientOptions);
 }
 
-const defaultClient = createClient(supabaseUrl, supabaseKey);
+const defaultClient = createClient(supabaseUrl, supabaseKey, clientOptions);
 
 module.exports = {
   getSupabaseClient,
