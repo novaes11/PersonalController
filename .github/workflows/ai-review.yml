@@ -44,8 +44,11 @@ jobs:
       - name: Run AI Agents Core
         if: steps.resolve_task.outputs.found == 'true'
         uses: novaes11/ai-agents-core@main
+        continue-on-error: true
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           notion_api_key: ${{ secrets.NOTION_API_KEY }}
           notion_task_id: ${{ steps.resolve_task.outputs.task_id }}
+          gemini_model: 'gemini-2.5-flash'
+
