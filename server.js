@@ -1,6 +1,10 @@
 const express = require('express');
 const app = express();
 
+app.get('/', (req, res) => {
+  res.status(200).json({ status: "ok", service: "PersonalController API", timestamp: new Date().toISOString() });
+});
+
 app.get('/health', (req, res) => {
   res.status(200).json({ status: "ok", "pipeline": "running" });
 });
