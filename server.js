@@ -1,13 +1,22 @@
 const express = require('express');
 const app = express();
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/index.js')) {
+    req.url = req.url.replace('/api/index.js', '') || '/';
+  }
+  next();
+});
 
-app.get('/', (req, res) => {
+const router = express.Router();
+router.get('/', (req, res) => {
   res.status(200).json({ status: "ok", service: "PersonalController API", timestamp: new Date().toISOString() });
 });
-
-app.get('/health', (req, res) => {
+router.get('/health', (req, res) => {
   res.status(200).json({ status: "ok", "pipeline": "running" });
 });
+
+app.use('/', router);
+app.use('/api', router);
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;

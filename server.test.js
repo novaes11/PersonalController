@@ -14,6 +14,18 @@ describe('GET /health', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ status: 'ok', pipeline: 'running' });
   });
+
+  it('should return 200 for /api/health route', async () => {
+    const response = await request(app).get('/api/health');
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ status: 'ok', pipeline: 'running' });
+  });
+
+  it('should return 200 for /api/index.js/health rewritten route', async () => {
+    const response = await request(app).get('/api/index.js/health');
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ status: 'ok', pipeline: 'running' });
+  });
 });
 
 describe('GET /', () => {
