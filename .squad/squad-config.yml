@@ -30,3 +30,18 @@ agents:
     division: engineering
     file: agents/engineering-code-reviewer.md
     sha256: 7509fcc3ea1dda46511b2801996305bf3d4a125576f9655ff0b63df25602f446
+  - slug: engineering-codebase-onboarding-engineer
+    code: "3.10"
+    division: engineering
+    file: agents/engineering-codebase-onboarding-engineer.md
+    sha256: 07aa548b45887c3ad768efad5fdbf6e57bea639df4f1b74c7e383142f454e2a1
+  - slug: specialized-codebase-archaeologist
+    code: "16.42"
+    division: specialized
+    file: agents/specialized-codebase-archaeologist.md
+    sha256: c1b2c22711cb6e74dd834f831d6a8b3f10c93cd462722073b01acae9d0a40700
+  - slug: specialized-document-generator
+    code: "16.45"
+    division: specialized
+    file: agents/specialized-document-generator.md
+    sha256: cd2ca961e0f7baa18942aaaa315e333ea4315604bbb6a182d7daa31b76dfc3a3
