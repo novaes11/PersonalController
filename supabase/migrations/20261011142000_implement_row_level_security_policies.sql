@@ -53,11 +53,11 @@ create policy "users_delete_own_profile"
 -- Garantir que RLS está habilitado
 alter table public.categories enable row level security;
 
--- Leitura: usuário autenticado visualiza categorias do sistema (globais) OU suas próprias
+-- Leitura: usuário autenticado ou anônimo visualiza categorias do sistema (globais) OU suas próprias
 create policy "categories_select_system_or_own"
   on public.categories
   for select
-  to authenticated
+  to authenticated, anon
   using (user_id is null or (select auth.uid()) = user_id);
 
 -- Inserção: usuário autenticado só cria categorias associadas ao seu user_id

@@ -36,3 +36,20 @@ describe('GET /', () => {
     expect(response.body.service).toBe('PersonalController API');
   });
 });
+
+describe('CORS and JSON parser middleware', () => {
+  it('should include CORS headers for allowed origin', async () => {
+    const response = await request(app)
+      .get('/health')
+      .set('Origin', 'http://localhost:5173');
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+  });
+
+  it('should parse JSON body properly in POST requests', async () => {
+    const response = await request(app)
+      .post('/categories')
+      .send({ name: 'Teste Parser', type: 'INVALID' });
+    expect(response.statusCode).toBe(400);
+    expect(response.body.status).toBe('error');
+  });
+});
