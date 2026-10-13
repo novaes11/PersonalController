@@ -14,15 +14,31 @@ const mockCategories = [
   { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Outras Despesas', type: 'EXPENSE', user_id: null }
 ];
 
+const mockUser = {
+  id: '11111111-1111-1111-1111-111111111111',
+  email: 'usuario.teste@exemplo.com'
+};
+
+const AUTH_HEADER = 'Bearer valid_token';
+
 jest.mock('../src/lib/supabase', () => {
   return {
     getSupabaseClient: jest.fn(() => ({
+      auth: {
+        getUser: jest.fn(async (jwt) => {
+          if (jwt === 'valid_token') {
+            return { data: { user: mockUser }, error: null };
+          }
+          return { data: { user: null }, error: { message: 'Invalid JWT' } };
+        })
+      },
       from: jest.fn(() => {
         let filterType = null;
         let filterId = null;
 
         const chain = {
           select: jest.fn().mockReturnThis(),
+          or: jest.fn().mockReturnThis(),
           eq: jest.fn(function (field, val) {
             if (field === 'type') filterType = val;
             if (field === 'id') filterId = val;
@@ -49,24 +65,28 @@ jest.mock('../src/lib/supabase', () => {
           })),
           update: jest.fn((patch) => ({
             eq: jest.fn().mockReturnValue({
-              select: jest.fn().mockReturnValue({
-                maybeSingle: jest.fn().mockImplementation(() => {
-                  if (filterId === '11111111-1111-1111-1111-111111111111') {
-                    return Promise.resolve({ data: { ...mockCategories[0], ...patch }, error: null });
-                  }
-                  return Promise.resolve({ data: null, error: null });
+              eq: jest.fn().mockReturnValue({
+                select: jest.fn().mockReturnValue({
+                  maybeSingle: jest.fn().mockImplementation(() => {
+                    if (filterId === '11111111-1111-1111-1111-111111111111') {
+                      return Promise.resolve({ data: { ...mockCategories[0], ...patch }, error: null });
+                    }
+                    return Promise.resolve({ data: null, error: null });
+                  })
                 })
               })
             })
           })),
           delete: jest.fn(() => ({
             eq: jest.fn().mockReturnValue({
-              select: jest.fn().mockReturnValue({
-                maybeSingle: jest.fn().mockImplementation(() => {
-                  if (filterId === '11111111-1111-1111-1111-111111111111') {
-                    return Promise.resolve({ data: mockCategories[0], error: null });
-                  }
-                  return Promise.resolve({ data: null, error: null });
+              eq: jest.fn().mockReturnValue({
+                select: jest.fn().mockReturnValue({
+                  maybeSingle: jest.fn().mockImplementation(() => {
+                    if (filterId === '11111111-1111-1111-1111-111111111111') {
+                      return Promise.resolve({ data: mockCategories[0], error: null });
+                    }
+                    return Promise.resolve({ data: null, error: null });
+                  })
                 })
               })
             })
@@ -83,77 +103,135 @@ jest.mock('../src/lib/supabase', () => {
 const app = require('../server');
 
 describe('Categories API - /categories', () => {
-  it('GET /categories deve retornar lista de categorias com status 200', async () => {
-    const response = await request(app).get('/categories');
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toHaveProperty('status', 'ok');
-    expect(Array.isArray(response.body.data)).toBe(true);
-    expect(response.body.count).toBe(11);
-  });
+  describe('Segurança e Autenticação (SEC-03)', () => {
+    it('GET /categories sem cabeçalho Authorization deve retornar 401', async () => {
+      const response = await request(app).get('/categories');
+      expect(response.statusCode).toBe(401);
+      expect(response.body.status).toBe('error');
+      expect(response.body.message).toContain('Token de autenticação ausente');
+    });
 
-  it('GET /categories?type=INCOME deve retornar apenas categorias de receita', async () => {
-    const response = await request(app).get('/categories?type=INCOME');
-    expect(response.statusCode).toBe(200);
-    expect(response.body.status).toBe('ok');
-    expect(Array.isArray(response.body.data)).toBe(true);
-    response.body.data.forEach(cat => {
-      expect(cat.type).toBe('INCOME');
+    it('GET /categories com token inválido deve retornar 401', async () => {
+      const response = await request(app)
+        .get('/categories')
+        .set('Authorization', 'Bearer token_invalido');
+      expect(response.statusCode).toBe(401);
+      expect(response.body.status).toBe('error');
+      expect(response.body.message).toContain('Sessão expirada ou token inválido');
     });
   });
 
-  it('GET /categories?type=EXPENSE deve retornar apenas categorias de despesa', async () => {
-    const response = await request(app).get('/categories?type=EXPENSE');
-    expect(response.statusCode).toBe(200);
-    expect(response.body.status).toBe('ok');
-    expect(Array.isArray(response.body.data)).toBe(true);
-    response.body.data.forEach(cat => {
-      expect(cat.type).toBe('EXPENSE');
+  describe('Operações Autenticadas', () => {
+    it('GET /categories deve retornar lista com status 200 e count quando autenticado', async () => {
+      const response = await request(app)
+        .get('/categories')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toHaveProperty('status', 'ok');
+      expect(response.body).toHaveProperty('count');
+      expect(Array.isArray(response.body.data)).toBe(true);
+      expect(response.body.data.length).toBe(11);
     });
-  });
 
-  it('GET /categories?type=INVALID deve retornar 400 Bad Request', async () => {
-    const response = await request(app).get('/categories?type=INVALID');
-    expect(response.statusCode).toBe(400);
-    expect(response.body.status).toBe('error');
-  });
-
-  it('GET /categories/:id com ID inexistente deve retornar 404', async () => {
-    const response = await request(app).get('/categories/00000000-0000-0000-0000-000000000000');
-    expect(response.statusCode).toBe(404);
-    expect(response.body.status).toBe('error');
-  });
-
-  it('POST /categories sem campos obrigatórios deve retornar 400 com detalhes de validação', async () => {
-    const response = await request(app).post('/categories').send({});
-    expect(response.statusCode).toBe(400);
-    expect(response.body.status).toBe('error');
-    expect(Array.isArray(response.body.errors)).toBe(true);
-  });
-
-  it('POST /categories com tipo inválido deve retornar 400', async () => {
-    const response = await request(app).post('/categories').send({
-      name: 'Categoria Teste',
-      type: 'INVALIDO'
+    it('GET /categories com filtro ?type=INCOME deve retornar apenas receitas', async () => {
+      const response = await request(app)
+        .get('/categories?type=INCOME')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(200);
+      expect(response.body.data.every(c => c.type === 'INCOME')).toBe(true);
+      expect(response.body.data.length).toBe(4);
     });
-    expect(response.statusCode).toBe(400);
-    expect(response.body.status).toBe('error');
-  });
 
-  it('POST /categories com payload válido deve criar e retornar 201', async () => {
-    const response = await request(app).post('/categories').send({
-      name: 'Freela Design',
-      type: 'INCOME',
-      color: '#10B981',
-      icon: 'sparkles'
+    it('GET /categories com filtro ?type=EXPENSE deve retornar apenas despesas', async () => {
+      const response = await request(app)
+        .get('/categories?type=EXPENSE')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(200);
+      expect(response.body.data.every(c => c.type === 'EXPENSE')).toBe(true);
+      expect(response.body.data.length).toBe(7);
     });
-    expect(response.statusCode).toBe(201);
-    expect(response.body.status).toBe('ok');
-    expect(response.body.data.name).toBe('Freela Design');
-  });
 
-  it('GET /api/categories deve funcionar com paridade de rota prefixada', async () => {
-    const response = await request(app).get('/api/categories');
-    expect(response.statusCode).toBe(200);
-    expect(response.body.status).toBe('ok');
+    it('GET /categories com tipo inválido deve retornar erro 400', async () => {
+      const response = await request(app)
+        .get('/categories?type=INVALID')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+      expect(response.body.message).toContain("Parâmetro 'type' deve ser 'INCOME' ou 'EXPENSE'");
+    });
+
+    it('GET /categories/:id com ID existente deve retornar 200 e a categoria', async () => {
+      const response = await request(app)
+        .get('/categories/11111111-1111-1111-1111-111111111111')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(200);
+      expect(response.body.status).toBe('ok');
+      expect(response.body.data.name).toBe('Salário');
+    });
+
+    it('GET /categories/:id com ID inexistente deve retornar 404', async () => {
+      const response = await request(app)
+        .get('/categories/00000000-0000-0000-0000-000000000000')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(404);
+      expect(response.body.status).toBe('error');
+      expect(response.body.message).toContain('não encontrada');
+    });
+
+    it('POST /categories sem body deve retornar 400 com erros de validação Zod', async () => {
+      const response = await request(app)
+        .post('/categories')
+        .set('Authorization', AUTH_HEADER)
+        .send({});
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+      expect(Array.isArray(response.body.errors)).toBe(true);
+    });
+
+    it('POST /categories com type inválido deve retornar 400', async () => {
+      const response = await request(app)
+        .post('/categories')
+        .set('Authorization', AUTH_HEADER)
+        .send({
+          name: 'Nova Categoria',
+          type: 'INVALIDO'
+        });
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+    });
+
+    it('POST /categories com payload válido deve criar e retornar 201 vinculando o user_id', async () => {
+      const response = await request(app)
+        .post('/categories')
+        .set('Authorization', AUTH_HEADER)
+        .send({
+          name: 'Freelance',
+          type: 'INCOME',
+          color: '#10B981',
+          icon: 'briefcase'
+        });
+      expect(response.statusCode).toBe(201);
+      expect(response.body.status).toBe('ok');
+      expect(response.body.data.name).toBe('Freelance');
+      expect(response.body.data.user_id).toBe(mockUser.id);
+    });
+
+    it('PUT /categories/:id com body vazio deve retornar 400', async () => {
+      const response = await request(app)
+        .put('/categories/11111111-1111-1111-1111-111111111111')
+        .set('Authorization', AUTH_HEADER)
+        .send({});
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+      expect(response.body.message).toContain('Nenhum campo fornecido');
+    });
+
+    it('GET /api/categories deve funcionar sob o prefixo serverless /api', async () => {
+      const response = await request(app)
+        .get('/api/categories')
+        .set('Authorization', AUTH_HEADER);
+      expect(response.statusCode).toBe(200);
+      expect(response.body.status).toBe('ok');
+    });
   });
 });

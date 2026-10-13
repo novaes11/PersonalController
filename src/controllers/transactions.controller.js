@@ -6,7 +6,8 @@ async function listTransactions(req, res) {
     const supabase = getSupabaseClient(req);
     let query = supabase
       .from('transactions')
-      .select('*, category:categories(id, name, type, color, icon)');
+      .select('*, category:categories(id, name, type, color, icon)')
+      .eq('user_id', req.user.id);
 
     // Filtros por período
     if (req.query.start_date) {
@@ -57,6 +58,7 @@ async function getTransactionById(req, res) {
       .from('transactions')
       .select('*, category:categories(id, name, type, color, icon)')
       .eq('id', id)
+      .eq('user_id', req.user.id)
       .maybeSingle();
 
     if (error) {
@@ -86,7 +88,11 @@ async function createTransaction(req, res) {
     }
 
     const supabase = getSupabaseClient(req);
-    const payload = { ...validation.data };
+    // AuthZ: Vincula estritamente a transação ao req.user.id autenticado, bloqueando bypass ou spoofing
+    const payload = {
+      ...validation.data,
+      user_id: req.user.id
+    };
 
     const { data, error } = await supabase
       .from('transactions')
@@ -126,10 +132,12 @@ async function updateTransaction(req, res) {
 
     const supabase = getSupabaseClient(req);
 
+    // AuthZ: Atualiza somente transação do usuário autenticado
     const { data, error } = await supabase
       .from('transactions')
       .update(validation.data)
       .eq('id', id)
+      .eq('user_id', req.user.id)
       .select('*, category:categories(id, name, type, color, icon)')
       .maybeSingle();
 
@@ -152,10 +160,12 @@ async function deleteTransaction(req, res) {
     const { id } = req.params;
     const supabase = getSupabaseClient(req);
 
+    // AuthZ: Exclui somente transação do usuário autenticado
     const { data, error } = await supabase
       .from('transactions')
       .delete()
       .eq('id', id)
+      .eq('user_id', req.user.id)
       .select()
       .maybeSingle();
 

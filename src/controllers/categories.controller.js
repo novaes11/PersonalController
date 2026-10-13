@@ -4,7 +4,11 @@ const { createCategorySchema, updateCategorySchema } = require('../schemas/categ
 async function listCategories(req, res) {
   try {
     const supabase = getSupabaseClient(req);
-    let query = supabase.from('categories').select('*');
+    // AuthZ: Lista categorias de sistema (user_id IS NULL) e as personalizadas do usuário autenticado
+    let query = supabase
+      .from('categories')
+      .select('*')
+      .or(`user_id.is.null,user_id.eq.${req.user.id}`);
 
     if (req.query.type) {
       const type = req.query.type.toUpperCase();
@@ -34,10 +38,12 @@ async function getCategoryById(req, res) {
     const { id } = req.params;
     const supabase = getSupabaseClient(req);
 
+    // AuthZ: Permite consultar categorias do sistema ou do próprio usuário
     const { data, error } = await supabase
       .from('categories')
       .select('*')
       .eq('id', id)
+      .or(`user_id.is.null,user_id.eq.${req.user.id}`)
       .maybeSingle();
 
     if (error) {
@@ -67,9 +73,15 @@ async function createCategory(req, res) {
     }
 
     const supabase = getSupabaseClient(req);
+    // AuthZ: Categoria customizada pertence estritamente ao usuário autenticado
+    const payload = {
+      ...validation.data,
+      user_id: req.user.id
+    };
+
     const { data, error } = await supabase
       .from('categories')
-      .insert([validation.data])
+      .insert([payload])
       .select()
       .single();
 
@@ -105,10 +117,12 @@ async function updateCategory(req, res) {
 
     const supabase = getSupabaseClient(req);
 
+    // AuthZ: Impede edição de categorias do sistema ou de terceiros; só atualiza se user_id == req.user.id
     const { data, error } = await supabase
       .from('categories')
       .update(validation.data)
       .eq('id', id)
+      .eq('user_id', req.user.id)
       .select()
       .maybeSingle();
 
@@ -117,7 +131,7 @@ async function updateCategory(req, res) {
     }
 
     if (!data) {
-      return res.status(404).json({ status: 'error', message: 'Categoria não encontrada para atualização' });
+      return res.status(404).json({ status: 'error', message: 'Categoria não encontrada ou você não tem permissão para editá-la' });
     }
 
     return res.status(200).json({ status: 'ok', data });
@@ -131,10 +145,12 @@ async function deleteCategory(req, res) {
     const { id } = req.params;
     const supabase = getSupabaseClient(req);
 
+    // AuthZ: Impede exclusão de categorias do sistema ou de terceiros; só exclui se user_id == req.user.id
     const { data, error } = await supabase
       .from('categories')
       .delete()
       .eq('id', id)
+      .eq('user_id', req.user.id)
       .select()
       .maybeSingle();
 
@@ -143,7 +159,7 @@ async function deleteCategory(req, res) {
     }
 
     if (!data) {
-      return res.status(404).json({ status: 'error', message: 'Categoria não encontrada para exclusão' });
+      return res.status(404).json({ status: 'error', message: 'Categoria não encontrada ou você não tem permissão para excluí-la' });
     }
 
     return res.status(200).json({ status: 'ok', message: 'Categoria excluída com sucesso', data });

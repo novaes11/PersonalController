@@ -47,8 +47,8 @@ describe('CORS and JSON parser middleware', () => {
 
   it('should parse JSON body properly in POST requests', async () => {
     const response = await request(app)
-      .post('/categories')
-      .send({ name: 'Teste Parser', type: 'INVALID' });
+      .post('/auth/signup')
+      .send({ email: 'email_invalido', password: '123' });
     expect(response.statusCode).toBe(400);
     expect(response.body.status).toBe('error');
   });
