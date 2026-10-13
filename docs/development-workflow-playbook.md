@@ -100,10 +100,11 @@ $$\mathbf{[<Prioridade>] \quad <Identificador> \quad <Separador> \quad <Ação \
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Dev as Desenvolvedor / Agente
+    actor Dev as Agente de IA / Dev
     participant Local as Branch Local
     participant Remote as GitHub (Remote)
     participant CI as GitHub Actions (CI)
+    actor Lead as Tech Lead / Usuário
     participant Main as Branch main
 
     Dev->>Local: git checkout -b feat/nome-da-tarefa
@@ -111,10 +112,12 @@ sequenceDiagram
     Dev->>Local: git commit -m "feat: ..." (valida pre-commit hook)
     Dev->>Remote: git push -u origin feat/nome-da-tarefa
     Dev->>Remote: gh pr create (abre Pull Request)
-    Remote->>CI: Dispara workflow ci.yml (testes em Node 22)
-    CI-->>Remote: Status Check: Verde (PASS)
-    Dev->>Main: gh pr merge --merge --delete-branch
-    Main->>Remote: Exclui branch remota automaticamente
+    Remote->>CI: Dispara workflows (ci.yml em Node 22)
+    CI-->>Remote: Status Checks: Verdes (PASS)
+    Dev-->>Lead: Apresenta o PR e aguarda revisão/aprovação
+    Lead->>Remote: Avalia e aprova o merge do PR
+    Remote->>Main: Merge realizado
+    Remote->>Remote: Exclui branch remota após o merge
     Dev->>Local: git checkout main && git pull && git branch -d ...
 ```
 
@@ -134,7 +137,9 @@ sequenceDiagram
    gh pr create --title "tipo(escopo): descrição clara" --body "## Descrição..."
    ```
 5. **Automação de CI no PR:** O PR deve aguardar aprovação de todos os checks (`build-and-test`, `squad`, `Vercel Preview`).
-6. **Merge e Exclusão Imediata da Branch:**
+6. **Aprovação Humana Obrigatória:** O agente de IA **NUNCA** faz o merge por conta própria. O Tech Lead / Usuário deve avaliar o PR, os testes e aprovar o merge explicitamente.
+7. **Merge e Exclusão Pós-Aprovação:**
+   * Apenas **depois** da aprovação e realização do merge, a branch de desenvolvimento deve ser excluída (remota e localmente):
    ```bash
    gh pr merge <numero> --merge --delete-branch
    git checkout main
@@ -241,7 +246,8 @@ Ao iniciar um novo projeto utilizando esta estratégia, execute esta sequência:
 - [ ] **Desenvolver e testar:** `npm test`
 - [ ] **Abrir PR:** `gh pr create`
 - [ ] **Validar CI:** Garantir checks verdes
-- [ ] **Merge:** `gh pr merge --merge --delete-branch`
+- [ ] **Aguardar Aprovação Humana:** Tech Lead / Usuário avalia e aprova o PR
+- [ ] **Merge e Exclusão da Branch:** Mesclar e deletar a branch remota e local apenas após a aprovação
 - [ ] **Atualizar Notion:** Mover card para `Concluído` com data e commit anexados.
 
 ---
