@@ -44,9 +44,11 @@ router.get('/health', (req, res) => {
 // Sub-rotas da aplicação
 const categoriesRoutes = require('./src/routes/categories.routes');
 const transactionsRoutes = require('./src/routes/transactions.routes');
+const authRoutes = require('./src/routes/auth.routes');
 
 router.use('/categories', categoriesRoutes);
 router.use('/transactions', transactionsRoutes);
+router.use('/auth', authRoutes);
 
 // Montagem do roteador na raiz e com prefixo /api para compatibilidade total
 app.use('/', router);
