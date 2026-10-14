@@ -34,6 +34,7 @@ async function requireAuth(req, res, next) {
     }
 
     req.user = user;
+    req.userId = user.id;
     return next();
   } catch (err) {
     return res.status(500).json({
@@ -43,6 +44,59 @@ async function requireAuth(req, res, next) {
   }
 }
 
+/**
+ * Middleware de Autorização (AuthZ) baseado em Roles (RBAC).
+ * Exige que req.user esteja autenticado e contenha uma das roles permitidas.
+ * @param {string|string[]} roles 
+ */
+function requireRole(roles = []) {
+  const allowed = Array.isArray(roles) ? roles : [roles];
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Autenticação necessária para esta operação'
+      });
+    }
+
+    const userRole = req.user.app_metadata?.role || req.user.user_metadata?.role || 'user';
+    if (!allowed.includes(userRole)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Acesso negado: permissões insuficientes para este recurso'
+      });
+    }
+
+    return next();
+  };
+}
+
+/**
+ * Middleware opcional de autenticação.
+ * Não bloqueia caso o token não exista, mas popula req.user se um JWT válido for enviado.
+ */
+async function optionalAuth(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const jwt = authHeader.slice(7).trim();
+      if (jwt) {
+        const supabase = getSupabaseClient(req);
+        const { data: { user } } = await supabase.auth.getUser(jwt);
+        if (user) {
+          req.user = user;
+          req.userId = user.id;
+        }
+      }
+    }
+    return next();
+  } catch {
+    return next();
+  }
+}
+
 module.exports = {
-  requireAuth
+  requireAuth,
+  requireRole,
+  optionalAuth
 };
