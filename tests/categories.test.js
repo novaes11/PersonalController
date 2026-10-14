@@ -216,6 +216,21 @@ describe('Categories API - /categories', () => {
       expect(response.body.data.user_id).toBe(mockUser.id);
     });
 
+    it('POST /categories com campos adicionais não permitidos (Mass Assignment) deve retornar 400 (SEC-04)', async () => {
+      const response = await request(app)
+        .post('/categories')
+        .set('Authorization', AUTH_HEADER)
+        .send({
+          name: 'Investimento Especial',
+          type: 'INCOME',
+          user_id: '99999999-9999-4999-a999-999999999999',
+          is_admin: true
+        });
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+      expect(response.body.errors[0].message).toContain('Mass Assignment detectado');
+    });
+
     it('PUT /categories/:id com body vazio deve retornar 400', async () => {
       const response = await request(app)
         .put('/categories/11111111-1111-1111-1111-111111111111')

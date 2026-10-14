@@ -211,13 +211,26 @@ describe('Transactions API - /transactions', () => {
         .send({
           amount: 120.00,
           date: '2026-10-11',
-          description: 'Jantar',
-          user_id: '22222222-2222-4222-a222-222222222222' // tentativa de spoofing com UUID v4 valido de outro usuario
+          description: 'Jantar'
         });
       expect(response.statusCode).toBe(201);
       expect(response.body.status).toBe('ok');
-      // AuthZ: user_id forçado deve ser o do usuário autenticado mockUser.id
       expect(response.body.data.user_id).toBe(mockUser.id);
+    });
+
+    it('POST /transactions com tentativa de Mass Assignment (user_id forjado) deve retornar 400 (SEC-04)', async () => {
+      const response = await request(app)
+        .post('/transactions')
+        .set('Authorization', AUTH_HEADER)
+        .send({
+          amount: 120.00,
+          date: '2026-10-11',
+          description: 'Jantar',
+          user_id: '22222222-2222-4222-a222-222222222222'
+        });
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+      expect(response.body.errors[0].message).toContain('Mass Assignment detectado');
     });
 
     it('PUT /transactions/:id com body vazio deve retornar 400', async () => {

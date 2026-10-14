@@ -1,5 +1,17 @@
 const { getSupabaseClient } = require('../lib/supabase');
-const { signupSchema, loginSchema } = require('../schemas/auth.schema');
+const { signupSchema, loginSchema, sanitizeUser } = require('../schemas/auth.schema');
+
+function formatZodIssues(issues) {
+  return issues.map(i => {
+    if (i.code === 'unrecognized_keys') {
+      return {
+        field: i.keys.join(', '),
+        message: `Campos não permitidos (Mass Assignment detectado): ${i.keys.join(', ')}`
+      };
+    }
+    return { field: i.path.join('.'), message: i.message };
+  });
+}
 
 async function signup(req, res) {
   try {
@@ -9,7 +21,7 @@ async function signup(req, res) {
       return res.status(400).json({
         status: 'error',
         message: 'Dados inválidos para cadastro',
-        errors: validation.error.issues.map(i => ({ field: i.path.join('.'), message: i.message }))
+        errors: formatZodIssues(validation.error.issues)
       });
     }
 
@@ -39,11 +51,7 @@ async function signup(req, res) {
     return res.status(201).json({
       status: 'ok',
       message: 'Usuário cadastrado com sucesso',
-      user: {
-        id: data.user?.id,
-        email: data.user?.email,
-        created_at: data.user?.created_at
-      },
+      user: sanitizeUser(data.user),
       session: data.session ? {
         access_token: data.session.access_token, // allowlist-secret
         expires_at: data.session.expires_at
@@ -65,7 +73,7 @@ async function login(req, res) {
       return res.status(400).json({
         status: 'error',
         message: 'Dados inválidos para autenticação',
-        errors: validation.error.issues.map(i => ({ field: i.path.join('.'), message: i.message }))
+        errors: formatZodIssues(validation.error.issues)
       });
     }
 
@@ -87,10 +95,7 @@ async function login(req, res) {
     return res.status(200).json({
       status: 'ok',
       message: 'Autenticado com sucesso',
-      user: {
-        id: data.user?.id,
-        email: data.user?.email
-      },
+      user: sanitizeUser(data.user),
       session: {
         access_token: data.session?.access_token, // allowlist-secret
         expires_at: data.session?.expires_at,
@@ -126,13 +131,7 @@ async function getMe(req, res) {
   try {
     return res.status(200).json({
       status: 'ok',
-      user: {
-        id: req.user.id,
-        email: req.user.email,
-        created_at: req.user.created_at,
-        app_metadata: req.user.app_metadata,
-        user_metadata: req.user.user_metadata
-      }
+      user: sanitizeUser(req.user)
     });
   } catch (err) {
     return res.status(500).json({
