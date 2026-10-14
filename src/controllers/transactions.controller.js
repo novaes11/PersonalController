@@ -1,5 +1,17 @@
 const { getSupabaseClient } = require('../lib/supabase');
-const { createTransactionSchema, updateTransactionSchema } = require('../schemas/transactions.schema');
+const { createTransactionSchema, updateTransactionSchema, sanitizeTransaction } = require('../schemas/transactions.schema');
+
+function formatZodIssues(issues) {
+  return issues.map(i => {
+    if (i.code === 'unrecognized_keys') {
+      return {
+        field: i.keys.join(', '),
+        message: `Campos não permitidos (Mass Assignment detectado): ${i.keys.join(', ')}`
+      };
+    }
+    return { field: i.path.join('.'), message: i.message };
+  });
+}
 
 async function listTransactions(req, res) {
   try {
@@ -37,12 +49,13 @@ async function listTransactions(req, res) {
       return res.status(500).json({ status: 'error', message: error.message });
     }
 
+    const sanitized = (data || []).map(sanitizeTransaction);
     return res.status(200).json({
       status: 'ok',
-      count: data?.length || 0,
+      count: sanitized.length,
       limit,
       offset,
-      data
+      data: sanitized
     });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
@@ -69,7 +82,7 @@ async function getTransactionById(req, res) {
       return res.status(404).json({ status: 'error', message: 'Transação não encontrada' });
     }
 
-    return res.status(200).json({ status: 'ok', data });
+    return res.status(200).json({ status: 'ok', data: sanitizeTransaction(data) });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
   }
@@ -83,12 +96,12 @@ async function createTransaction(req, res) {
       return res.status(400).json({
         status: 'error',
         message: 'Dados inválidos para criação da transação',
-        errors: validation.error.issues.map(i => ({ field: i.path.join('.'), message: i.message }))
+        errors: formatZodIssues(validation.error.issues)
       });
     }
 
     const supabase = getSupabaseClient(req);
-    // AuthZ: Vincula estritamente a transação ao req.user.id autenticado, bloqueando bypass ou spoofing
+    // AuthZ: Vincula estritamente a transação ao req.user.id autenticado
     const payload = {
       ...validation.data,
       user_id: req.user.id
@@ -104,7 +117,7 @@ async function createTransaction(req, res) {
       return res.status(500).json({ status: 'error', message: error.message });
     }
 
-    return res.status(201).json({ status: 'ok', data });
+    return res.status(201).json({ status: 'ok', data: sanitizeTransaction(data) });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
   }
@@ -119,7 +132,7 @@ async function updateTransaction(req, res) {
       return res.status(400).json({
         status: 'error',
         message: 'Dados inválidos para atualização da transação',
-        errors: validation.error.issues.map(i => ({ field: i.path.join('.'), message: i.message }))
+        errors: formatZodIssues(validation.error.issues)
       });
     }
 
@@ -149,7 +162,7 @@ async function updateTransaction(req, res) {
       return res.status(404).json({ status: 'error', message: 'Transação não encontrada para atualização' });
     }
 
-    return res.status(200).json({ status: 'ok', data });
+    return res.status(200).json({ status: 'ok', data: sanitizeTransaction(data) });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
   }
@@ -177,7 +190,7 @@ async function deleteTransaction(req, res) {
       return res.status(404).json({ status: 'error', message: 'Transação não encontrada para exclusão' });
     }
 
-    return res.status(200).json({ status: 'ok', message: 'Transação excluída com sucesso', data });
+    return res.status(200).json({ status: 'ok', message: 'Transação excluída com sucesso', data: sanitizeTransaction(data) });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
   }
