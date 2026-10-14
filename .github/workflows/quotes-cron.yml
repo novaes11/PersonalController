@@ -1,0 +1,16 @@
+name: Quotes 30-Min Cron Worker
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  update-quotes:
+    name: Atualizar Cotacoes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Quotes Cron Endpoint
+        run: |
+          curl -fsSL -X POST https://personalcontroller.vercel.app/api/cron/quotes \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" || true

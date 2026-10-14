@@ -37,9 +37,19 @@ function getSupabaseClient(req) {
   return createClient(supabaseUrl, supabaseKey, clientOptions);
 }
 
+/**
+ * Cria cliente administrativo do Supabase para workers e cron jobs.
+ * Utiliza a service role key para bypass de RLS em operações em lote de catálogo/cotações.
+ */
+function getSupabaseAdminClient() {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey;
+  return createClient(supabaseUrl, serviceKey, clientOptions);
+}
+
 const defaultClient = createClient(supabaseUrl, supabaseKey, clientOptions);
 
 module.exports = {
   getSupabaseClient,
+  getSupabaseAdminClient,
   supabase: defaultClient
 };
