@@ -46,11 +46,13 @@ const categoriesRoutes = require('./src/routes/categories.routes');
 const transactionsRoutes = require('./src/routes/transactions.routes');
 const authRoutes = require('./src/routes/auth.routes');
 const cronRoutes = require('./src/routes/cron.routes');
+const portfolioRoutes = require('./src/routes/portfolio.routes');
 
 router.use('/categories', categoriesRoutes);
 router.use('/transactions', transactionsRoutes);
 router.use('/auth', authRoutes);
 router.use('/cron', cronRoutes);
+router.use('/portfolio', portfolioRoutes);
 
 // Montagem do roteador na raiz e com prefixo /api para compatibilidade total
 app.use('/', router);

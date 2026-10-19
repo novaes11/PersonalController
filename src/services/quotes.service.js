@@ -167,6 +167,37 @@ async function getQuotesForAssets(assets = [], forceRefresh = false) {
 }
 
 /**
+ * Obtém cotação do cache em memória se ainda estiver dentro do TTL.
+ * @param {string} ticker
+ * @returns {{ price: number, timestamp: string, source: string } | null}
+ */
+function getCachedQuote(ticker) {
+  if (!ticker) return null;
+  const key = normalizeTicker(ticker);
+  const cached = memoryCache.get(key);
+  if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
+    return {
+      price: cached.price,
+      source: 'cache',
+      timestamp: new Date(cached.timestamp).toISOString()
+    };
+  }
+  return null;
+}
+
+/**
+ * Define manualmente uma cotação no cache em memória.
+ * @param {string} ticker
+ * @param {number} price
+ * @param {number} [timestamp=Date.now()]
+ */
+function setCachedQuote(ticker, price, timestamp = Date.now()) {
+  if (!ticker || typeof price !== 'number' || Number.isNaN(price)) return;
+  const key = normalizeTicker(ticker);
+  memoryCache.set(key, { price, timestamp });
+}
+
+/**
  * Limpa o cache em memória (útil para testes ou reinicialização)
  */
 function clearQuotesCache() {
@@ -177,6 +208,9 @@ module.exports = {
   getQuotesForAssets,
   fetchAwesomeApiQuotes,
   fetchBrapiQuotes,
+  getCachedQuote,
+  setCachedQuote,
   clearQuotesCache,
   normalizeTicker
 };
+
