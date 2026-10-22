@@ -1,0 +1,153 @@
+/**
+ * PersonalController — Design System & Tokens CSS Mobile-First (E05.T01)
+ * Arquitetura em 3 Camadas: Primitive -> Semantic -> Component
+ * Padrão Mobile-First (375px base -> 640px sm -> 768px md -> 1024px lg -> 1280px xl)
+ */
+
+:root {
+  /* ==========================================================================
+   * 1. PRIMITIVE TOKENS (Valores Brutos de Paleta, Escala 4/8px e Tipografia)
+   * ========================================================================== */
+  --color-slate-950: #020617;
+  --color-slate-900: #0F172A;
+  --color-slate-800: #1E293B;
+  --color-slate-700: #334155;
+  --color-slate-400: #94A3B8;
+  --color-slate-300: #CBD5E1;
+  --color-slate-200: #E2E8F0;
+  --color-slate-100: #F1F5F9;
+  --color-slate-50:  #F8FAFC;
+  --color-white:     #FFFFFF;
+
+  --color-indigo-600: #4F46E5;
+  --color-indigo-500: #6366F1;
+  --color-indigo-400: #818CF8;
+
+  --color-emerald-500: #10B981;
+  --color-emerald-400: #34D399;
+  --color-emerald-300: #6EE7B7;
+  --color-emerald-950: #022C22;
+
+  --color-rose-500: #F43F5E;
+  --color-rose-400: #FB7185;
+  --color-rose-300: #FDA4AF;
+  --color-rose-950: #4C0519;
+
+  --color-amber-500: #F59E0B;
+  --color-amber-400: #FBBF24;
+  --color-amber-300: #FCD34D;
+
+  /* Tipografia */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Escala de Espaçamento (Ritmo 4px / 8px) */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Ergonomia Mobile-First & Safe Areas */
+  --touch-target-min: 44px;
+  --touch-target-comfortable: 48px;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ==========================================================================
+   * 2. SEMANTIC TOKENS (Propósito de Interface — Tema Escuro Padrão)
+   * ========================================================================== */
+  --bg-canvas:   var(--color-slate-950);
+  --bg-surface:  var(--color-slate-900);
+  --bg-elevated: var(--color-slate-800);
+
+  --text-primary:   var(--color-slate-50);
+  --text-secondary: var(--color-slate-300);
+  --text-muted:     var(--color-slate-400);
+
+  --border-subtle:  var(--color-slate-800);
+  --border-strong:  var(--color-slate-700);
+
+  --brand-primary:       var(--color-indigo-600);
+  --brand-primary-hover: var(--color-indigo-500);
+  --focus-ring:          var(--color-indigo-400);
+
+  --status-income-fg: var(--color-emerald-400);
+  --status-income-bg: var(--color-emerald-950);
+  --status-expense-fg: var(--color-rose-400);
+  --status-expense-bg: var(--color-rose-950);
+  --status-warning-fg: var(--color-amber-400);
+
+  /* ==========================================================================
+   * 3. COMPONENT TOKENS (Tokens Específicos de Componentes)
+   * ========================================================================== */
+  --card-bg:      var(--bg-surface);
+  --card-border:  var(--border-subtle);
+  --card-padding: var(--space-4);
+  --card-radius:  var(--radius-lg);
+
+  --button-bg:         var(--brand-primary);
+  --button-bg-hover:   var(--brand-primary-hover);
+  --button-fg:         var(--color-white);
+  --button-min-height: var(--touch-target-min);
+
+  --input-bg:         var(--bg-canvas);
+  --input-border:     var(--border-strong);
+  --input-fg:         var(--text-primary);
+  --input-min-height: var(--touch-target-min);
+
+  --bottom-nav-height: 64px;
+  --sidebar-width:     256px;
+}
+
+/* Tema Claro (Light Mode Parity com contraste WCAG AA >= 4.5:1) */
+[data-theme="light"] {
+  --bg-canvas:   var(--color-slate-50);
+  --bg-surface:  var(--color-white);
+  --bg-elevated: var(--color-slate-100);
+
+  --text-primary:   var(--color-slate-950);
+  --text-secondary: var(--color-slate-700);
+  --text-muted:     var(--color-slate-700);
+
+  --border-subtle:  var(--color-slate-200);
+  --border-strong:  var(--color-slate-300);
+}
+
+/* Progressão Mobile-First: Eleva espaçamentos em viewports maiores (>= 768px) */
+@media (min-width: 768px) {
+  :root {
+    --card-padding: var(--space-6);
+  }
+}
+
+/* Utilitários Base de Ergonomia Mobile-First */
+.touch-target {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+}
+
+.pb-safe-bottom {
+  padding-bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom) + var(--space-4));
+}
+
+/* Acessibilidade: Respeita preferência de movimento reduzido (WCAG 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
