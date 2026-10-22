@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { authRateLimiter, apiRateLimiter } = require('./src/middlewares/rateLimit.middleware');
 
 const app = express();
 
@@ -41,18 +42,18 @@ router.get('/health', (req, res) => {
   res.status(200).json({ status: "ok", "pipeline": "running" });
 });
 
-// Sub-rotas da aplicação
+// Sub-rotas da aplicação com proteção de Rate Limiting (SEC-05)
 const categoriesRoutes = require('./src/routes/categories.routes');
 const transactionsRoutes = require('./src/routes/transactions.routes');
 const authRoutes = require('./src/routes/auth.routes');
 const cronRoutes = require('./src/routes/cron.routes');
 const portfolioRoutes = require('./src/routes/portfolio.routes');
 
-router.use('/categories', categoriesRoutes);
-router.use('/transactions', transactionsRoutes);
-router.use('/auth', authRoutes);
+router.use('/categories', apiRateLimiter, categoriesRoutes);
+router.use('/transactions', apiRateLimiter, transactionsRoutes);
+router.use('/auth', authRateLimiter, authRoutes);
 router.use('/cron', cronRoutes);
-router.use('/portfolio', portfolioRoutes);
+router.use('/portfolio', apiRateLimiter, portfolioRoutes);
 
 // Montagem do roteador na raiz e com prefixo /api para compatibilidade total
 app.use('/', router);
