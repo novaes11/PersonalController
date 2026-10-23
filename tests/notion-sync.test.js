@@ -5,7 +5,6 @@ const {
 const {
   fetchEligibleNotionTasks,
   createGitHubIssue,
-  markNotionTaskInProgress,
   syncNotionToGitHub
 } = require('../scripts/notion-github-sync');
 
