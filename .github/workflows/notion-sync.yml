@@ -1,0 +1,44 @@
+name: "Notion to GitHub Issue Sync"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Executar em modo Dry-Run (sem criar issues reais nem alterar o Notion)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 * * * *" # Executa a cada hora
+
+jobs:
+  sync-tasks:
+    name: "Sync Notion Tasks to GitHub Issues"
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Notion Sync
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY || secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: "e8dc8924-7ab1-83f1-a029-01bde21e3dcf"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            node scripts/notion-github-sync.js --dry-run
+          else
+            node scripts/notion-github-sync.js
+          fi
