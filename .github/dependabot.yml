@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # Monitoramento de dependências npm (package.json)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "novaes11"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Monitoramento de versões de GitHub Actions (.github/workflows)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "novaes11"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
