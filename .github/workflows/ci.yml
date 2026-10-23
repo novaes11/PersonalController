@@ -19,5 +19,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify Secret Hygiene
+        run: |
+          echo "Auditoria de segredos e arquivos sensíveis..."
+          if git ls-files | grep -E '\.env$|\.env\.local$'; then
+            echo "ERRO: Arquivo .env detectado no repositório!"
+            exit 1
+          fi
+          echo "Nenhum arquivo de ambiente sensível detectado."
+
       - name: Run tests
         run: npm test
