@@ -45,7 +45,7 @@ function calculateFinancialKpis(transactions = [], options = {}) {
     const amount = Number(tx?.amount) || 0;
     if (amount <= 0) continue;
 
-    const categoryType = tx?.category?.type || tx?.type || 'EXPENSE';
+    const categoryType = tx?.category?.type || tx?.categories?.type || tx?.type || 'EXPENSE';
     if (categoryType === 'INCOME') {
       totalIncome += amount;
     } else {
