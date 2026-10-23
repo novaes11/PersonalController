@@ -57,6 +57,11 @@ Agentes obrigatórios para consulta de comportamento:
 - Nunca atribua chaves ou tokens hardcoded no código de produção.
 - Em arquivos de teste onde valores dummy simulam tokens ou senhas, adicione o comentário `// allowlist-secret` ao final da linha para evitar bloqueio pelo hook de segurança.
 
+### E. Atuação do Copilot Coding Agent ao Resolver Issues
+- **Vínculo com Issue:** Ao criar o Pull Request, referencie explicitamente a issue correspondente no corpo do PR (ex: `Closes #12` ou `Ref #12`).
+- **Verificação Pré-PR:** Assegure-se de que novos cenários de teste foram adicionados à suíte Jest e que a estrutura de pastas existente foi rigorosamente preservada.
+- **Preenchimento do PR Template:** Preencha integralmente o cabeçalho, a tabela de arquivos impactados, a evidência dos testes e o checklist de AppSec definido em `.github/pull_request_template.md`.
+
 ---
 
 ## 4. Contexto Complementar
