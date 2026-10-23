@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { authRateLimiter, apiRateLimiter } = require('./src/middlewares/rateLimit.middleware');
+const { renderAppPage } = require('./src/frontend/pages/renderAppPage');
 
 const app = express();
 
@@ -33,6 +34,12 @@ app.use(express.json());
 
 // Roteador principal
 const router = express.Router();
+
+// Rota Visual da Aplicação SPA Mobile-First (E05.T04)
+router.get(['/dashboard', '/app'], (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(renderAppPage());
+});
 
 router.get('/', (req, res) => {
   res.status(200).json({ status: "ok", service: "PersonalController API", timestamp: new Date().toISOString() });
