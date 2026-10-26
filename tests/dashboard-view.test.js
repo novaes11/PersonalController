@@ -120,7 +120,17 @@ describe('E05.T04 — Integração da View Principal do Dashboard e Rota Visual 
     expect(html).toContain('<script src="https://cdn.tailwindcss.com"></script>');
   });
 
-  test('4. Rota Express GET /dashboard e GET /app retorna HTTP 200 (text/html) sem alterar o contrato de GET / e GET /health', async () => {
+  test('4. renderAppPage() aplica paridade global de tema para light mode com theme-color dinâmico e overrides CSS', () => {
+    const html = renderAppPage({ theme: 'light' });
+    expect(html).toContain('<html lang="pt-BR" data-theme="light">');
+    expect(html).toContain('<meta name="theme-color" content="#F8FAFC" />');
+    expect(html).toContain('[data-theme="light"] .bg-slate-900');
+    expect(html).toContain('background-color: var(--bg-surface) !important;');
+    expect(html).toContain('function applyTheme(nextTheme)');
+    expect(html).toContain("themeMeta.setAttribute('content', state.theme === 'light' ? '#F8FAFC' : '#0F172A');");
+  });
+
+  test('5. Rota Express GET /dashboard e GET /app retorna HTTP 200 (text/html) sem alterar o contrato de GET / e GET /health', async () => {
     // 1) GET /dashboard retorna HTML da aplicação SPA
     const dashboardRes = await request(app).get('/dashboard');
     expect(dashboardRes.status).toBe(200);
