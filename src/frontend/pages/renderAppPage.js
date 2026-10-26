@@ -12,6 +12,8 @@ function renderAppPage(options = {}) {
     activeTab = 'overview',
     theme = 'dark'
   } = options;
+  const normalizedTheme = theme === 'light' ? 'light' : 'dark';
+  const themeColor = normalizedTheme === 'light' ? '#F8FAFC' : '#0F172A';
 
   const demoData = createDemoDataset();
   const tokensCss = getDesignTokensCss(); // allowlist-secret
@@ -27,18 +29,18 @@ function renderAppPage(options = {}) {
 
   const appShellHtml = renderAppShellMarkup({
     activeTab,
-    theme,
+    theme: normalizedTheme,
     user: demoData.user,
     isRefreshing: false,
     contentHtml: dashboardContentHtml
   });
 
   return `<!DOCTYPE html>
-<html lang="pt-BR" data-theme="${theme}">
+<html lang="pt-BR" data-theme="${normalizedTheme}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0F172A" />
+  <meta name="theme-color" content="${themeColor}" />
   <meta name="description" content="PersonalController — Gestão Financeira Inteligente Mobile-First e Carteira Consolidada" />
   <title>PersonalController — Dashboard Financeiro</title>
 
@@ -85,6 +87,55 @@ ${tokensCss}
       color: var(--text-primary, #020617);
     }
 
+    /* Paridade global de tema (light) para utilitários Tailwind usados nos componentes SSR */
+    [data-theme="light"] .bg-slate-950,
+    [data-theme="light"] .bg-slate-950\\/95,
+    [data-theme="light"] .bg-slate-950\\/90,
+    [data-theme="light"] .bg-slate-950\\/60,
+    [data-theme="light"] .bg-slate-900,
+    [data-theme="light"] .bg-slate-900\\/95,
+    [data-theme="light"] .bg-slate-900\\/90,
+    [data-theme="light"] .bg-slate-900\\/50,
+    [data-theme="light"] .bg-slate-900\\/40,
+    [data-theme="light"] .bg-slate-800,
+    [data-theme="light"] .bg-slate-800\\/60,
+    [data-theme="light"] .bg-slate-800\\/40,
+    [data-theme="light"] .bg-slate-800\\/30 {
+      background-color: var(--bg-surface) !important;
+    }
+
+    [data-theme="light"] .border-slate-900,
+    [data-theme="light"] .border-slate-800,
+    [data-theme="light"] .border-slate-800\\/80,
+    [data-theme="light"] .border-slate-800\\/70,
+    [data-theme="light"] .border-slate-700 {
+      border-color: var(--border-subtle) !important;
+    }
+
+    [data-theme="light"] .text-white,
+    [data-theme="light"] .text-slate-100,
+    [data-theme="light"] .text-slate-50 {
+      color: var(--text-primary) !important;
+    }
+
+    [data-theme="light"] .text-slate-400,
+    [data-theme="light"] .text-slate-300,
+    [data-theme="light"] .text-slate-200 {
+      color: var(--text-secondary) !important;
+    }
+
+    [data-theme="light"] .hover\\:bg-slate-900\\/60:hover,
+    [data-theme="light"] .hover\\:bg-slate-900\\/50:hover,
+    [data-theme="light"] .hover\\:bg-slate-800:hover,
+    [data-theme="light"] .hover\\:bg-slate-700:hover {
+      background-color: var(--bg-elevated) !important;
+    }
+
+    [data-theme="light"] .hover\\:text-white:hover,
+    [data-theme="light"] .hover\\:text-slate-100:hover {
+      color: var(--text-primary) !important;
+    }
+
     .tabular-nums {
       font-variant-numeric: tabular-nums;
     }
@@ -100,7 +151,7 @@ ${tokensCss}
     (function () {
       // Estado reativo em memória
       const state = {
-        theme: '${theme}',
+        theme: '${normalizedTheme}',
         activeTab: '${activeTab}',
         isFormOpen: false,
         transactions: ${JSON.stringify(demoData.transactions)},
@@ -111,12 +162,24 @@ ${tokensCss}
       };
 
       // Alternância de Tema (Dark / Light)
-      function toggleTheme() {
-        state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      function applyTheme(nextTheme) {
+        state.theme = nextTheme === 'light' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', state.theme);
         const appShell = document.querySelector('[data-testid="app-shell"]');
         if (appShell) appShell.setAttribute('data-theme', state.theme);
+        const themeMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeMeta) {
+          themeMeta.setAttribute('content', state.theme === 'light' ? '#F8FAFC' : '#0F172A');
+        }
+        document.querySelectorAll('[data-testid="theme-toggle-btn"], [data-testid="sidebar-theme-toggle-btn"]')
+          .forEach(btn => btn.setAttribute('aria-pressed', state.theme === 'light' ? 'true' : 'false'));
       }
+
+      function toggleTheme() {
+        applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+      }
+
+      applyTheme(state.theme);
 
       // Conexão de botões de tema
       document.querySelectorAll('[data-testid="theme-toggle-btn"], [data-testid="sidebar-theme-toggle-btn"]')
