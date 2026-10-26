@@ -34,6 +34,8 @@ jobs:
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY || secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: "e8dc8924-7ab1-83f1-a029-01bde21e3dcf"
+          NOTION_PROJECT_ID: "b08c8924-7ab1-8326-9a9d-01260b4983cb"
+          NOTION_PROJECT_NAME: "PersonalController"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
