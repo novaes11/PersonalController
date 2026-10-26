@@ -86,6 +86,7 @@ function RecentTransactionsTable(props = {}, ReactInstance = global.React) {
         'tr',
         {
           key: tx.id,
+          'data-testid': `transaction-row-${tx.id}`,
           'data-transaction-id': tx.id,
           className: 'border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors'
         },
@@ -136,14 +137,74 @@ function RecentTransactionsTable(props = {}, ReactInstance = global.React) {
             {
               type: 'button',
               'data-action': 'delete',
+              'data-tx-id': tx.id,
               'data-transaction-id': tx.id,
               disabled: isDeleting || isLoading,
               'aria-label': `Excluir transação ${tx.description || tx.id}`,
               onClick: () => onDelete && onDelete(tx.id),
-              className: 'inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500'
+              className: 'delete-btn touch-target inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500',
+              style: { minHeight: '44px', minWidth: '44px' }
             },
             isDeleting ? 'Excluindo...' : 'Excluir'
           )
+        )
+      );
+    });
+
+    const mobileCards = transactions.map(tx => {
+      const catType = tx.category?.type || 'EXPENSE';
+      const catName = tx.category?.name || 'Sem categoria';
+      const isIncome = catType === 'INCOME';
+      const isDeleting = deletingId === tx.id;
+      const amountClass = isIncome ? 'text-emerald-400' : 'text-rose-400';
+      const typeClass = isIncome
+        ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+        : 'bg-rose-950/70 text-rose-300 border-rose-800/60';
+
+      return h(
+        'li',
+        {
+          key: `${tx.id}-mobile`,
+          'data-testid': `transaction-card-${tx.id}`,
+          className: 'rounded-xl border border-slate-800 bg-slate-950/50 p-4 space-y-3'
+        },
+        h(
+          'div',
+          { className: 'flex items-start justify-between gap-2' },
+          h('div', null,
+            h('p', { className: 'text-sm font-semibold text-slate-100' }, tx.description || 'Sem descrição'),
+            h('p', { className: 'text-xs text-slate-400 mt-1' }, formatDateBR(tx.date))
+          ),
+          h(
+            'span',
+            { className: `inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${typeClass}` },
+            isIncome ? 'Receita' : 'Despesa'
+          )
+        ),
+        h(
+          'div',
+          { className: 'flex items-center justify-between gap-2' },
+          h(
+            'span',
+            { className: 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700' },
+            catName
+          ),
+          h('span', { className: `text-sm font-semibold ${amountClass}` }, formatCurrencyBRL(tx.amount, catType))
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            'data-action': 'delete',
+            'data-tx-id': tx.id,
+            'data-transaction-id': tx.id,
+            disabled: isDeleting || isLoading,
+            'aria-label': `Excluir transação ${tx.description || tx.id}`,
+            onClick: () => onDelete && onDelete(tx.id),
+            className: 'delete-btn touch-target w-full inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500',
+            style: { minHeight: '44px', minWidth: '44px' }
+          },
+          isDeleting ? 'Excluindo...' : 'Excluir'
         )
       );
     });
@@ -199,25 +260,34 @@ function RecentTransactionsTable(props = {}, ReactInstance = global.React) {
             )
           : h(
               'div',
-              { className: 'overflow-x-auto' },
+              { className: 'space-y-3' },
               h(
-                'table',
-                { id: 'recent-transactions-table', className: 'w-full text-left border-collapse' },
+                'ul',
+                { 'data-testid': 'transactions-mobile-list', className: 'md:hidden p-3 space-y-3' },
+                mobileCards
+              ),
+              h(
+                'div',
+                { className: 'hidden md:block overflow-x-auto' },
                 h(
-                  'thead',
-                  null,
+                  'table',
+                  { id: 'recent-transactions-table', className: 'w-full text-left border-collapse' },
                   h(
-                    'tr',
-                    { className: 'border-b border-slate-800 bg-slate-950/60 text-xs font-semibold uppercase tracking-wider text-slate-400' },
-                    h('th', { scope: 'col', className: 'py-3 px-4' }, 'Data'),
-                    h('th', { scope: 'col', className: 'py-3 px-4' }, 'Descrição'),
-                    h('th', { scope: 'col', className: 'py-3 px-4' }, 'Categoria'),
-                    h('th', { scope: 'col', className: 'py-3 px-4' }, 'Tipo'),
-                    h('th', { scope: 'col', className: 'py-3 px-4 text-right' }, 'Valor'),
-                    h('th', { scope: 'col', className: 'py-3 px-4 text-right' }, 'Ações')
-                  )
-                ),
-                h('tbody', null, rows)
+                    'thead',
+                    null,
+                    h(
+                      'tr',
+                      { className: 'border-b border-slate-800 bg-slate-950/60 text-xs font-semibold uppercase tracking-wider text-slate-400' },
+                      h('th', { scope: 'col', className: 'py-3 px-4' }, 'Data'),
+                      h('th', { scope: 'col', className: 'py-3 px-4' }, 'Descrição'),
+                      h('th', { scope: 'col', className: 'py-3 px-4' }, 'Categoria'),
+                      h('th', { scope: 'col', className: 'py-3 px-4' }, 'Tipo'),
+                      h('th', { scope: 'col', className: 'py-3 px-4 text-right' }, 'Valor'),
+                      h('th', { scope: 'col', className: 'py-3 px-4 text-right' }, 'Ações')
+                    )
+                  ),
+                  h('tbody', { 'data-testid': 'transactions-table-body' }, rows)
+                )
               )
             ),
       h(
@@ -313,33 +383,65 @@ function renderRecentTransactionsTableMarkup(props = {}) {
           : 'bg-rose-950/70 text-rose-300 border-rose-800/60';
         const amountClass = isIncome ? 'text-emerald-400' : 'text-rose-400';
 
-        return `<tr data-transaction-id="${escapeHtml(tx.id)}" class="border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors">
+        return `<tr data-testid="transaction-row-${escapeHtml(tx.id)}" data-transaction-id="${escapeHtml(tx.id)}" class="border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors">
           <td class="py-3.5 px-4 text-sm text-slate-300 whitespace-nowrap">${escapeHtml(formatDateBR(tx.date))}</td>
           <td class="py-3.5 px-4 text-sm font-medium text-slate-100">${escapeHtml(tx.description || 'Sem descrição')}</td>
           <td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">${escapeHtml(catName)}</span></td>
           <td class="py-3.5 px-4 text-sm whitespace-nowrap"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${badgeClass}">${isIncome ? 'Receita' : 'Despesa'}</span></td>
           <td class="py-3.5 px-4 text-sm font-semibold text-right whitespace-nowrap ${amountClass}">${escapeHtml(formatCurrencyBRL(tx.amount, catType))}</td>
           <td class="py-3.5 px-4 text-sm text-right whitespace-nowrap">
-            <button type="button" data-action="delete" data-transaction-id="${escapeHtml(tx.id)}" aria-label="Excluir transação ${escapeHtml(tx.description || tx.id)}" class="inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors"${isDeleting ? ' disabled' : ''}>${isDeleting ? 'Excluindo...' : 'Excluir'}</button>
+            <button type="button" data-action="delete" data-tx-id="${escapeHtml(tx.id)}" data-transaction-id="${escapeHtml(tx.id)}" aria-label="Excluir transação ${escapeHtml(tx.description || tx.id)}" class="delete-btn touch-target inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors" style="min-height: 44px; min-width: 44px;"${isDeleting ? ' disabled' : ''}>${isDeleting ? 'Excluindo...' : 'Excluir'}</button>
           </td>
         </tr>`;
       })
       .join('');
 
-    bodyHtml = `<div class="overflow-x-auto">
-      <table id="recent-transactions-table" class="w-full text-left border-collapse">
-        <thead>
-          <tr class="border-b border-slate-800 bg-slate-950/60 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            <th scope="col" class="py-3 px-4">Data</th>
-            <th scope="col" class="py-3 px-4">Descrição</th>
-            <th scope="col" class="py-3 px-4">Categoria</th>
-            <th scope="col" class="py-3 px-4">Tipo</th>
-            <th scope="col" class="py-3 px-4 text-right">Valor</th>
-            <th scope="col" class="py-3 px-4 text-right">Ações</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
+    const mobileRowsHtml = transactions
+      .map(tx => {
+        const catType = tx.category?.type || 'EXPENSE';
+        const catName = tx.category?.name || 'Sem categoria';
+        const isIncome = catType === 'INCOME';
+        const isDeleting = deletingId === tx.id;
+        const amountClass = isIncome ? 'text-emerald-400' : 'text-rose-400';
+        const typeClass = isIncome
+          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+          : 'bg-rose-950/70 text-rose-300 border-rose-800/60';
+        return `<li data-testid="transaction-card-${escapeHtml(tx.id)}" class="rounded-xl border border-slate-800 bg-slate-950/50 p-4 space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <p class="text-sm font-semibold text-slate-100">${escapeHtml(tx.description || 'Sem descrição')}</p>
+              <p class="text-xs text-slate-400 mt-1">${escapeHtml(formatDateBR(tx.date))}</p>
+            </div>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${typeClass}">${isIncome ? 'Receita' : 'Despesa'}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">${escapeHtml(catName)}</span>
+            <span class="text-sm font-semibold ${amountClass}">${escapeHtml(formatCurrencyBRL(tx.amount, catType))}</span>
+          </div>
+          <button type="button" data-action="delete" data-tx-id="${escapeHtml(tx.id)}" data-transaction-id="${escapeHtml(tx.id)}" aria-label="Excluir transação ${escapeHtml(tx.description || tx.id)}" class="delete-btn touch-target w-full inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors" style="min-height: 44px; min-width: 44px;"${isDeleting ? ' disabled' : ''}>${isDeleting ? 'Excluindo...' : 'Excluir'}</button>
+        </li>`;
+      })
+      .join('');
+
+    bodyHtml = `<div class="space-y-3">
+      <ul data-testid="transactions-mobile-list" class="md:hidden p-3 space-y-3">
+        ${mobileRowsHtml}
+      </ul>
+      <div class="hidden md:block overflow-x-auto">
+        <table id="recent-transactions-table" class="w-full text-left border-collapse">
+          <thead>
+            <tr class="border-b border-slate-800 bg-slate-950/60 text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <th scope="col" class="py-3 px-4">Data</th>
+              <th scope="col" class="py-3 px-4">Descrição</th>
+              <th scope="col" class="py-3 px-4">Categoria</th>
+              <th scope="col" class="py-3 px-4">Tipo</th>
+              <th scope="col" class="py-3 px-4 text-right">Valor</th>
+              <th scope="col" class="py-3 px-4 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody data-testid="transactions-table-body">${rowsHtml}</tbody>
+        </table>
+      </div>
     </div>`;
   }
 
