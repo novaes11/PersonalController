@@ -23,11 +23,13 @@ function extractPlainText(titleProperty) {
  * compatível com `.github/ISSUE_TEMPLATE/copilot_task.md`.
  *
  * @param {object} notionPage Dados da página retornados pela Notion API
+ * @param {object} options Opções adicionais de contexto (ex: projectName)
  * @returns {{ title: string, body: string, labels: string[] }}
  */
-function refineTaskForCopilot(notionPage = {}) {
+function refineTaskForCopilot(notionPage = {}, options = {}) {
   const pageId = notionPage.id || 'N/A';
   const properties = notionPage.properties || {};
+  const projectName = options.projectName || process.env.NOTION_PROJECT_NAME || 'PersonalController';
 
   const rawTitle = extractPlainText(properties.Task || properties.Name || properties.title) || 'Tarefa Sem Título';
   const cleanTitle = rawTitle.replace(/^\[(P\d)\]\s*/i, '').trim();
@@ -49,6 +51,7 @@ function refineTaskForCopilot(notionPage = {}) {
 
   const body = `## 📋 Contexto da Demanda
 - **Identificador Notion:** \`${pageId}\`
+- **Projeto:** ${projectName}
 - **Módulo / Domínio:** ${domain}
 - **Prioridade:** ${priority}
 - **Responsável Técnico / Aprovador:** João Vitor Novaes (@novaes11)
