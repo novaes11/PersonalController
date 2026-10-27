@@ -99,6 +99,16 @@ ${tokensCss}
     (function () {
       const STORAGE_KEY = 'pc_auth_session';
 
+      function saveSessionStorage(sessionObj) {
+        const serialized = JSON.stringify(sessionObj);
+        try {
+          localStorage.setItem(STORAGE_KEY, serialized);
+        } catch (err) {}
+        try {
+          sessionStorage.setItem(STORAGE_KEY, serialized);
+        } catch (err) {}
+      }
+
       // Auto-redirecionamento se já houver sessão ativa salva
       try {
         const existingSession = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
@@ -140,10 +150,28 @@ ${tokensCss}
           .forEach(el => el.remove());
       }
 
+      function translateErrorMessage(rawMessage, isSignup) {
+        if (!rawMessage) {
+          return isSignup ? 'Erro ao criar conta.' : 'Credenciais inválidas.';
+        }
+        const lower = String(rawMessage).toLowerCase();
+        if (lower.includes('already registered') || lower.includes('already exists')) {
+          return 'Este endereço de e-mail já está cadastrado. Tente entrar na conta.';
+        }
+        if (lower.includes('invalid login credentials')) {
+          return 'E-mail ou senha incorretos.';
+        }
+        if (lower.includes('email not confirmed')) {
+          return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+        }
+        return rawMessage;
+      }
+
       function setMode(newMode) {
         currentMode = newMode;
         if (authView) authView.dataset.authMode = newMode;
         const isSignup = newMode === 'signup';
+        clearAlerts();
 
         if (loginTab) {
           loginTab.setAttribute('aria-selected', !isSignup ? 'true' : 'false');
@@ -188,11 +216,11 @@ ${tokensCss}
             },
             token: 'demo-token-' + Date.now() // allowlist-secret
           };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(demoSession));
+          saveSessionStorage(demoSession);
           showAlert('success', 'Acesso ao Modo Demonstração concedido! Redirecionando...');
           setTimeout(() => {
             window.location.href = '/dashboard';
-          }, 400);
+          }, 300);
         });
       }
 
@@ -224,16 +252,29 @@ ${tokensCss}
 
           try {
             const endpoint = currentMode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
-            const response = await fetch(endpoint, {
+            const fallbackEndpoint = currentMode === 'signup' ? '/auth/signup' : '/auth/login';
+            const requestInit = {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email, password })
-            });
+            };
 
-            const data = await response.json();
+            let response = await fetch(endpoint, requestInit);
+            if (response.status === 404) {
+              response = await fetch(fallbackEndpoint, requestInit);
+            }
+
+            let data = {};
+            try {
+              data = await response.json();
+            } catch (parseErr) {
+              data = { message: 'Resposta inesperada do servidor (HTTP ' + response.status + ').' };
+            }
 
             if (!response.ok) {
-              const msg = data.message || (currentMode === 'signup' ? 'Erro ao criar conta.' : 'Credenciais inválidas.');
+              const firstFieldError = Array.isArray(data.errors) && data.errors[0]?.message;
+              const rawMsg = firstFieldError || data.message;
+              const msg = translateErrorMessage(rawMsg, currentMode === 'signup');
               showAlert('error', msg);
               return;
             }
@@ -244,11 +285,16 @@ ${tokensCss}
               user: data.user || { email },
               isDemo: false
             };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionData));
-            showAlert('success', 'Autenticação realizada com sucesso! Redirecionando...');
+            saveSessionStorage(sessionData);
+            showAlert(
+              'success',
+              currentMode === 'signup'
+                ? 'Conta criada com sucesso! Redirecionando para o painel...'
+                : 'Autenticação realizada com sucesso! Redirecionando...'
+            );
             setTimeout(() => {
               window.location.href = '/dashboard';
-            }, 500);
+            }, 400);
           } catch (err) {
             showAlert('error', 'Falha de conexão com o servidor. Tente novamente.');
           } finally {

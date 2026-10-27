@@ -9,8 +9,28 @@ const app = express();
 
 // Middleware para normalização de rota serverless da Vercel
 app.use((req, res, next) => {
-  if (req.url.startsWith('/api/index.js')) {
-    req.url = req.url.replace('/api/index.js', '') || '/';
+  const headerPath =
+    req.headers['x-rewritten-path'] ||
+    (req.headers['x-matched-path'] &&
+    !req.headers['x-matched-path'].startsWith('/api/index')
+      ? req.headers['x-matched-path']
+      : null);
+
+  if (req.url.startsWith('/api/index.js') || headerPath || req.url.includes('__path=')) {
+    const parsedUrl = new URL(req.url, 'http://localhost');
+    const queryPath = parsedUrl.searchParams.get('__path');
+    parsedUrl.searchParams.delete('__path');
+
+    const resolvedPath =
+      queryPath ||
+      headerPath ||
+      parsedUrl.pathname.replace('/api/index.js', '') ||
+      '/';
+
+    const normalizedPath = '/' + resolvedPath.replace(/^\/+/, '');
+    const remainingQuery = parsedUrl.searchParams.toString();
+    req.url = normalizedPath + (remainingQuery ? `?${remainingQuery}` : '');
+    req.originalUrl = req.url;
   }
   next();
 });

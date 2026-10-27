@@ -311,6 +311,26 @@ ${tokensCss}
         });
       });
 
+      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações
+      try {
+        var rawSession = localStorage.getItem('pc_auth_session') || sessionStorage.getItem('pc_auth_session');
+        if (rawSession) {
+          var parsedSession = JSON.parse(rawSession);
+          var sessionUser = parsedSession && parsedSession.user;
+          if (sessionUser && sessionUser.email) {
+            var indicatorLabel = parsedSession.isDemo ? 'Modo Demonstração' : sessionUser.email;
+            document.querySelectorAll('[data-testid="account-indicator"], [data-testid="sidebar-account-indicator"]')
+              .forEach(function (el) { el.textContent = indicatorLabel; });
+            var settingsEmailEl = document.querySelector('[data-testid="settings-user-email"]');
+            if (settingsEmailEl) {
+              settingsEmailEl.textContent = parsedSession.isDemo
+                ? sessionUser.email + ' (Modo Demonstração)'
+                : sessionUser.email;
+            }
+          }
+        }
+      } catch (e) {}
+
       // Ação Unificada de Logout / Retorno para Login
       function handleLogout() {
         try {
