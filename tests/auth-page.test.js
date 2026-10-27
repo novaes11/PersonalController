@@ -1,6 +1,6 @@
 const request = require('supertest');
 const app = require('../server');
-const { renderLandingPage, renderAuthPage } = require('../src/frontend/pages/renderLandingPage');
+const { renderLandingPage } = require('../src/frontend/pages/renderLandingPage');
 
 describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /signup) e Root Deploy', () => {
   test('1. renderLandingPage() gera documento HTML5 com doctype, tokens de design e markup de login', () => {
