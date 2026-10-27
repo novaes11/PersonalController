@@ -185,6 +185,20 @@ ${tokensCss}
       document.querySelectorAll('[data-testid="theme-toggle-btn"], [data-testid="sidebar-theme-toggle-btn"]')
         .forEach(btn => btn.addEventListener('click', toggleTheme));
 
+      // Ação de Logout / Retorno para Login
+      document.querySelectorAll('[data-testid="logout-btn"], [data-testid="account-indicator"]')
+        .forEach(el => {
+          el.style.cursor = 'pointer';
+          el.title = 'Clique para sair da conta ou trocar de usuário';
+          el.addEventListener('click', () => {
+            try {
+              localStorage.removeItem('pc_auth_session');
+              sessionStorage.removeItem('pc_auth_session');
+            } catch (err) {}
+            window.location.href = '/login?logout=true';
+          });
+        });
+
       // Alternância de abas de navegação
       function switchTab(tabId) {
         state.activeTab = tabId;
