@@ -118,6 +118,7 @@ describe('E05.T04 — Integração da View Principal do Dashboard e Rota Visual 
     expect(html).toContain('id="pc-design-tokens"');
     expect(html).toContain('PersonalController — Dashboard Financeiro');
     expect(html).toContain('<script src="https://cdn.tailwindcss.com"></script>');
+    expect(html).toContain('data-testid="transactions-mobile-list"');
   });
 
   test('4. renderAppPage() aplica paridade global de tema para light mode com theme-color dinâmico e overrides CSS', () => {
@@ -128,6 +129,8 @@ describe('E05.T04 — Integração da View Principal do Dashboard e Rota Visual 
     expect(html).toContain('background-color: var(--bg-surface) !important;');
     expect(html).toContain('function applyTheme(nextTheme)');
     expect(html).toContain("themeMeta.setAttribute('content', state.theme === 'light' ? '#F8FAFC' : '#0F172A');");
+    expect(html).toContain('role="dialog" aria-modal="true" aria-label="Nova Transação"');
+    expect(html).toContain('data-testid="quick-transaction-backdrop"');
   });
 
   test('5. Rota Express GET /dashboard e GET /app retorna HTTP 200 (text/html) sem alterar o contrato de GET / e GET /health', async () => {

@@ -73,21 +73,27 @@ describe('Tabela de Transações Recentes (E04.T02)', () => {
       expect(formatCurrencyBRL(5500, 'INCOME')).toContain('+ R$');
     });
 
-    it('deve renderizar a tabela HTML com linhas, categorias, paginação e botões de exclusão', () => {
+    it('deve renderizar lista mobile + tabela desktop com linhas, categorias, paginação e botões de exclusão', () => {
       const html = renderRecentTransactionsTableMarkup({
         transactions: mockTransactionsPage1,
         limit: 2,
         offset: 0
       });
 
+      expect(html).toContain('data-testid="transactions-mobile-list"');
+      expect(html).toContain('data-testid="transaction-card-11111111-1111-4111-a111-111111111111"');
       expect(html).toContain('<table id="recent-transactions-table"');
+      expect(html).toContain('class="hidden md:block overflow-x-auto"');
+      expect(html).toContain('data-testid="transactions-table-body"');
       expect(html).toContain('Supermercado Semanal');
       expect(html).toContain('Salário Mensal');
       expect(html).toContain('21/10/2026');
       expect(html).toContain('Alimentação');
       expect(html).toContain('Despesa');
       expect(html).toContain('Receita');
-      expect(html).toContain('data-action="delete" data-transaction-id="11111111-1111-4111-a111-111111111111"');
+      expect(html).toContain('data-transaction-id="11111111-1111-4111-a111-111111111111"');
+      expect(html).toContain('class="delete-btn touch-target');
+      expect(html).toContain('min-height: 44px; min-width: 44px;');
       expect(html).toContain('Página 1');
       // Na página 1 (offset 0), botão Anterior deve estar disabled e Próxima habilitado (pois 2 === limit)
       expect(html).toMatch(/id="pagination-prev-btn"[^>]*\sdisabled>/);
