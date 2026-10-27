@@ -43,6 +43,7 @@ router.get(['/dashboard', '/app'], (req, res) => {
 });
 
 // Rotas Visuais de Autenticação (/login, /signup) e Acesso (E05.T03)
+// codeql[js/missing-rate-limiting] Rotas GET SSR protegidas por apiRateLimiter; autenticação de credenciais ocorre em POST /api/auth/login
 router.get(['/login', '/signup', '/auth-view'], apiRateLimiter, (req, res) => {
   const mode = req.path.includes('signup') ? 'signup' : 'login';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -50,6 +51,7 @@ router.get(['/login', '/signup', '/auth-view'], apiRateLimiter, (req, res) => {
 });
 
 // Rota Raiz: Serve a interface web (Tela de Login/Acesso) para navegadores e preserva JSON para API
+// codeql[js/missing-rate-limiting] Rota GET raiz protegida por apiRateLimiter que serve UI de acesso aos navegadores
 router.get('/', apiRateLimiter, (req, res) => {
   const isHtmlBrowserRequest = Boolean(
     req.headers.accept &&
