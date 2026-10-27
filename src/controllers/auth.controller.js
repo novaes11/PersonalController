@@ -1,4 +1,4 @@
-const { getSupabaseClient } = require('../lib/supabase');
+const { getSupabaseClient, getSupabaseAdminClient } = require('../lib/supabase');
 const { signupSchema, loginSchema, sanitizeUser } = require('../schemas/auth.schema');
 
 function formatZodIssues(issues) {
@@ -11,6 +11,20 @@ function formatZodIssues(issues) {
     }
     return { field: i.path.join('.'), message: i.message };
   });
+}
+
+function resolveProfileDbClient(fallbackClient, accessToken) {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY && typeof getSupabaseAdminClient === 'function') {
+    return getSupabaseAdminClient();
+  }
+  if (accessToken && typeof getSupabaseClient === 'function') {
+    return getSupabaseClient({
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      }
+    });
+  }
+  return fallbackClient;
 }
 
 async function signup(req, res) {
@@ -42,10 +56,17 @@ async function signup(req, res) {
 
     // Se o usuário foi criado, garante registro do perfil na tabela public.users
     if (data.user) {
-      await supabase.from('users').upsert({
-        id: data.user.id,
-        email: data.user.email
-      }, { onConflict: 'id' });
+      try {
+        const dbClient = resolveProfileDbClient(supabase, data.session?.access_token);
+        if (dbClient && typeof dbClient.from === 'function') {
+          await dbClient.from('users').upsert({
+            id: data.user.id,
+            email: data.user.email
+          }, { onConflict: 'id' });
+        }
+      } catch (profileErr) {
+        // Não bloqueia conclusão do cadastro caso confirmação de e-mail esteja pendente
+      }
     }
 
     return res.status(201).json({
@@ -90,6 +111,19 @@ async function login(req, res) {
         status: 'error',
         message: 'Credenciais inválidas'
       });
+    }
+
+    // Garante sincronização do perfil em public.users após login autenticado
+    if (data.user && data.session?.access_token) {
+      try {
+        const dbClient = resolveProfileDbClient(supabase, data.session.access_token);
+        if (dbClient && typeof dbClient.from === 'function') {
+          await dbClient.from('users').upsert({
+            id: data.user.id,
+            email: data.user.email
+          }, { onConflict: 'id' });
+        }
+      } catch (profileErr) {}
     }
 
     return res.status(200).json({

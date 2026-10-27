@@ -61,4 +61,42 @@ describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /
     expect(apiPrefixRes.headers['content-type']).toMatch(/json/);
     expect(apiPrefixRes.body.status).toBe('ok');
   });
+
+  test('7. Normalização Serverless (Vercel rewrite ?__path=/dashboard) entrega o Dashboard HTML ao invés de JSON de status', async () => {
+    const dashboardRes = await request(app)
+      .get('/api/index.js?__path=/dashboard')
+      .set('Accept', 'text/html,application/xhtml+xml');
+
+    expect(dashboardRes.status).toBe(200);
+    expect(dashboardRes.headers['content-type']).toMatch(/text\/html/);
+    expect(dashboardRes.text).toContain('data-testid="app-shell"');
+    expect(dashboardRes.text).toContain('data-testid="dashboard-view"');
+  });
+
+  test('8. Normalização Serverless (Vercel rewrite ?__path=/api/auth/signup) encaminha POST para o controller de cadastro (sem 404)', async () => {
+    const signupPostRes = await request(app)
+      .post('/api/index.js?__path=/api/auth/signup')
+      .send({});
+
+    // Deve bater no controller de auth (retornando 400 de validação de email/senha ausentes) e NUNCA 404 Cannot POST /api/index.js
+    expect(signupPostRes.status).toBe(400);
+    expect(signupPostRes.body.status).toBe('error');
+    expect(Array.isArray(signupPostRes.body.errors)).toBe(true);
+  });
+
+  test('9. Normalização Serverless via cabeçalho x-rewritten-path restaura rota /signup e /health', async () => {
+    const rewrittenSignupRes = await request(app)
+      .get('/api/index.js')
+      .set('x-rewritten-path', '/signup');
+
+    expect(rewrittenSignupRes.status).toBe(200);
+    expect(rewrittenSignupRes.headers['content-type']).toMatch(/text\/html/);
+    expect(rewrittenSignupRes.text).toContain('data-auth-mode="signup"');
+
+    const rewrittenHealthRes = await request(app)
+      .get('/api/index.js?__path=/health');
+
+    expect(rewrittenHealthRes.status).toBe(200);
+    expect(rewrittenHealthRes.body).toEqual({ status: 'ok', pipeline: 'running' });
+  });
 });
