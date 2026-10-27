@@ -43,14 +43,14 @@ router.get(['/dashboard', '/app'], (req, res) => {
 });
 
 // Rotas Visuais de Autenticação (/login, /signup) e Acesso (E05.T03)
-router.get(['/login', '/signup', '/auth-view'], (req, res) => {
+router.get(['/login', '/signup', '/auth-view'], apiRateLimiter, (req, res) => {
   const mode = req.path.includes('signup') ? 'signup' : 'login';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.status(200).send(renderAuthPage({ mode }));
 });
 
 // Rota Raiz: Serve a interface web (Tela de Login/Acesso) para navegadores e preserva JSON para API
-router.get('/', (req, res) => {
+router.get('/', apiRateLimiter, (req, res) => {
   const isHtmlBrowserRequest = Boolean(
     req.headers.accept &&
     req.headers.accept.includes('text/html') &&
