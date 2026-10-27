@@ -1,11 +1,15 @@
 const { getDesignTokensCss } = require('../styles/designSystem');
 const { renderAppShellMarkup } = require('../components/AppShell');
 const { renderDashboardViewMarkup } = require('../components/DashboardView');
+const { renderCashflowViewMarkup } = require('../components/CashflowView');
+const { renderPortfolioViewMarkup } = require('../components/PortfolioView');
+const { renderSettingsViewMarkup } = require('../components/SettingsView');
+const { renderInboxViewMarkup } = require('../components/InboxView');
 const { createDemoDataset } = require('../services/authApi');
 
 /**
- * Gera o documento HTML5 completo da Single-Page Application (SPA) Mobile-First (E05.T04),
- * servido em `GET /dashboard` e `GET /app`.
+ * Gera o documento HTML5 completo da Single-Page Application (SPA) Mobile-First,
+ * com suporte completo a abas dinâmicas, header, sidebar e interatividade (E06.T02).
  */
 function renderAppPage(options = {}) {
   const {
@@ -27,12 +31,48 @@ function renderAppPage(options = {}) {
     isFormOpen: false
   });
 
+  const cashflowContentHtml = renderCashflowViewMarkup({
+    transactions: demoData.transactions,
+    categories: demoData.categories
+  });
+
+  const portfolioContentHtml = renderPortfolioViewMarkup({
+    portfolio: demoData.portfolio
+  });
+
+  const settingsContentHtml = renderSettingsViewMarkup({
+    user: demoData.user,
+    theme: normalizedTheme,
+    categories: demoData.categories
+  });
+
+  const inboxContentHtml = renderInboxViewMarkup();
+
+  // Envelopamento em containers de abas (tab panes) dinâmicos
+  const tabsContentHtml = [
+    '<div id="tab-pane-overview" data-testid="tab-pane-overview" class="tab-pane ' + (activeTab === 'overview' ? 'block' : 'hidden') + '">',
+    dashboardContentHtml,
+    '</div>',
+    '<div id="tab-pane-cashflow" data-testid="tab-pane-cashflow" class="tab-pane ' + (activeTab === 'cashflow' ? 'block' : 'hidden') + '">',
+    cashflowContentHtml,
+    '</div>',
+    '<div id="tab-pane-portfolio" data-testid="tab-pane-portfolio" class="tab-pane ' + (activeTab === 'portfolio' ? 'block' : 'hidden') + '">',
+    portfolioContentHtml,
+    '</div>',
+    '<div id="tab-pane-settings" data-testid="tab-pane-settings" class="tab-pane ' + (activeTab === 'settings' ? 'block' : 'hidden') + '">',
+    settingsContentHtml,
+    '</div>',
+    '<div id="tab-pane-inbox" data-testid="tab-pane-inbox" class="tab-pane ' + (activeTab === 'inbox' ? 'block' : 'hidden') + '">',
+    inboxContentHtml,
+    '</div>'
+  ].join('\n');
+
   const appShellHtml = renderAppShellMarkup({
     activeTab,
     theme: normalizedTheme,
     user: demoData.user,
     isRefreshing: false,
-    contentHtml: dashboardContentHtml
+    contentHtml: tabsContentHtml
   });
 
   return `<!DOCTYPE html>
@@ -92,12 +132,15 @@ ${tokensCss}
     [data-theme="light"] .bg-slate-950\\/95,
     [data-theme="light"] .bg-slate-950\\/90,
     [data-theme="light"] .bg-slate-950\\/60,
+    [data-theme="light"] .bg-slate-950\\/50,
+    [data-theme="light"] .bg-slate-950\\/40,
     [data-theme="light"] .bg-slate-900,
     [data-theme="light"] .bg-slate-900\\/95,
     [data-theme="light"] .bg-slate-900\\/90,
     [data-theme="light"] .bg-slate-900\\/50,
     [data-theme="light"] .bg-slate-900\\/40,
     [data-theme="light"] .bg-slate-800,
+    [data-theme="light"] .bg-slate-800\\/80,
     [data-theme="light"] .bg-slate-800\\/60,
     [data-theme="light"] .bg-slate-800\\/40,
     [data-theme="light"] .bg-slate-800\\/30 {
@@ -108,6 +151,7 @@ ${tokensCss}
     [data-theme="light"] .border-slate-800,
     [data-theme="light"] .border-slate-800\\/80,
     [data-theme="light"] .border-slate-800\\/70,
+    [data-theme="light"] .border-slate-800\\/60,
     [data-theme="light"] .border-slate-700 {
       border-color: var(--border-subtle) !important;
     }
@@ -139,6 +183,28 @@ ${tokensCss}
     .tabular-nums {
       font-variant-numeric: tabular-nums;
     }
+
+    /* Container de Toasts de Notificação */
+    #pc-toast-container {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+
+    .pc-toast {
+      pointer-events: auto;
+      animation: toastFadeIn 0.25s ease-out;
+    }
+
+    @keyframes toastFadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -146,14 +212,19 @@ ${tokensCss}
     ${appShellHtml}
   </div>
 
-  <!-- Runtime Interativo SPA do Cliente (E05.T04) -->
+  <div id="pc-toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Runtime Interativo SPA do Cliente (E06.T02) -->
   <script>
     (function () {
       // Estado reativo em memória
-      const state = {
+      var state = {
         theme: '${normalizedTheme}',
         activeTab: '${activeTab}',
         isFormOpen: false,
+        isRefreshing: false,
+        cashflowFilter: 'ALL',
+        cashflowSearch: '',
         transactions: ${JSON.stringify(demoData.transactions)},
         categories: ${JSON.stringify(demoData.categories)},
         portfolio: ${JSON.stringify(demoData.portfolio)},
@@ -161,49 +232,131 @@ ${tokensCss}
         upcomingExpenses15d: 0
       };
 
-      // Alternância de Tema (Dark / Light)
+      // Exibição de Toasts Flutuantes Acessíveis
+      function showToast(message, type) {
+        var container = document.getElementById('pc-toast-container');
+        if (!container) return;
+
+        var toast = document.createElement('div');
+        toast.setAttribute('role', 'status');
+        toast.className = 'pc-toast flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-xs font-medium ' +
+          (type === 'error'
+            ? 'bg-rose-950 text-rose-200 border-rose-800'
+            : 'bg-slate-900 text-slate-100 border-slate-700');
+
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        setTimeout(function () {
+          toast.style.transition = 'opacity 0.3s ease-out, transform 0.3s ease-out';
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateY(-10px)';
+          setTimeout(function () { toast.remove(); }, 300);
+        }, 2500);
+      }
+
+      // Alternância de Tema (Dark / Light) com Persistência
       function applyTheme(nextTheme) {
         state.theme = nextTheme === 'light' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', state.theme);
-        const appShell = document.querySelector('[data-testid="app-shell"]');
+        var appShell = document.querySelector('[data-testid="app-shell"]');
         if (appShell) appShell.setAttribute('data-theme', state.theme);
-        const themeMeta = document.querySelector('meta[name="theme-color"]');
+        var themeMeta = document.querySelector('meta[name="theme-color"]');
         if (themeMeta) {
           themeMeta.setAttribute('content', state.theme === 'light' ? '#F8FAFC' : '#0F172A');
         }
+
+        try {
+          localStorage.setItem('pc_theme', state.theme);
+        } catch (e) {}
+
         document.querySelectorAll('[data-testid="theme-toggle-btn"], [data-testid="sidebar-theme-toggle-btn"]')
-          .forEach(btn => btn.setAttribute('aria-pressed', state.theme === 'light' ? 'true' : 'false'));
+          .forEach(function (btn) { btn.setAttribute('aria-pressed', state.theme === 'light' ? 'true' : 'false'); });
+
+        document.querySelectorAll('[data-theme-select]').forEach(function (btn) {
+          var isSelected = btn.getAttribute('data-theme-select') === state.theme;
+          if (isSelected) {
+            btn.classList.add('border-indigo-500', 'bg-slate-800/80');
+            btn.classList.remove('border-slate-800', 'bg-slate-950/50');
+          } else {
+            btn.classList.remove('border-indigo-500', 'bg-slate-800/80');
+            btn.classList.add('border-slate-800', 'bg-slate-950/50');
+          }
+        });
       }
 
       function toggleTheme() {
         applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+        showToast('Tema alterado para modo ' + (state.theme === 'light' ? 'Claro' : 'Escuro'));
       }
 
+      try {
+        var savedTheme = localStorage.getItem('pc_theme');
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          state.theme = savedTheme;
+        }
+      } catch (e) {}
       applyTheme(state.theme);
 
-      // Conexão de botões de tema
       document.querySelectorAll('[data-testid="theme-toggle-btn"], [data-testid="sidebar-theme-toggle-btn"]')
-        .forEach(btn => btn.addEventListener('click', toggleTheme));
+        .forEach(function (btn) { btn.addEventListener('click', toggleTheme); });
 
-      // Ação de Logout / Retorno para Login
-      document.querySelectorAll('[data-testid="logout-btn"], [data-testid="account-indicator"]')
-        .forEach(el => {
+      document.querySelectorAll('[data-theme-select]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var selected = btn.getAttribute('data-theme-select');
+          if (selected) {
+            applyTheme(selected);
+            showToast('Tema alterado para modo ' + (selected === 'light' ? 'Claro' : 'Escuro'));
+          }
+        });
+      });
+
+      // Ação Unificada de Logout / Retorno para Login
+      function handleLogout() {
+        try {
+          localStorage.removeItem('pc_auth_session');
+          sessionStorage.removeItem('pc_auth_session');
+        } catch (err) {}
+        window.location.href = '/login?logout=true';
+      }
+
+      document.querySelectorAll('[data-testid="logout-btn"], [data-testid="account-indicator"], [data-testid="sidebar-account-indicator"], [data-testid="settings-logout-btn"]')
+        .forEach(function (el) {
           el.style.cursor = 'pointer';
           el.title = 'Clique para sair da conta ou trocar de usuário';
-          el.addEventListener('click', () => {
-            try {
-              localStorage.removeItem('pc_auth_session');
-              sessionStorage.removeItem('pc_auth_session');
-            } catch (err) {}
-            window.location.href = '/login?logout=true';
-          });
+          el.addEventListener('click', handleLogout);
         });
 
-      // Alternância de abas de navegação
+      var TAB_META = {
+        overview: {
+          title: 'Visão Geral',
+          description: 'Dashboard principal de liquidez, burn rate e alocação'
+        },
+        cashflow: {
+          title: 'Fluxo de Caixa',
+          description: 'Lançamentos, orçamentos e despesas recorrentes'
+        },
+        portfolio: {
+          title: 'Carteira',
+          description: 'Posição consolidada, rentabilidade e distribuição de ativos'
+        },
+        settings: {
+          title: 'Configurações',
+          description: 'Categorias, preferências de conta e aparência'
+        },
+        inbox: {
+          title: 'Inbox / Produtividade',
+          description: 'E-mails lidos, alertas gerados por IA e triagem pendente'
+        }
+      };
+
+      // Alternância de Abas com Mudança Dinâmica de Conteúdo
       function switchTab(tabId) {
+        if (!TAB_META[tabId]) tabId = 'overview';
         state.activeTab = tabId;
-        document.querySelectorAll('[data-nav-tab]').forEach(btn => {
-          const isCurrent = btn.getAttribute('data-nav-tab') === tabId;
+
+        document.querySelectorAll('[data-nav-tab]').forEach(function (btn) {
+          var isCurrent = btn.getAttribute('data-nav-tab') === tabId;
           btn.setAttribute('aria-current', isCurrent ? 'page' : 'false');
           if (btn.hasAttribute('data-testid') && btn.getAttribute('data-testid').startsWith('sidebar-tab-')) {
             btn.className = isCurrent
@@ -216,32 +369,79 @@ ${tokensCss}
           }
         });
 
-        const titles = {
-          overview: 'Visão Geral',
-          cashflow: 'Fluxo de Caixa',
-          portfolio: 'Carteira',
-          settings: 'Configurações',
-          inbox: 'Inbox / Produtividade'
-        };
+        var viewTitle = document.querySelector('[data-testid="active-view-title"]');
+        if (viewTitle) viewTitle.textContent = TAB_META[tabId].title;
+        var viewDesc = document.querySelector('[data-testid="active-view-description"]');
+        if (viewDesc) viewDesc.textContent = TAB_META[tabId].description;
 
-        const viewTitle = document.querySelector('[data-testid="active-view-title"]');
-        if (viewTitle && titles[tabId]) {
-          viewTitle.textContent = titles[tabId];
+        document.querySelectorAll('.tab-pane').forEach(function (pane) {
+          pane.classList.remove('block');
+          pane.classList.add('hidden');
+        });
+        var activePane = document.getElementById('tab-pane-' + tabId);
+        if (activePane) {
+          activePane.classList.remove('hidden');
+          activePane.classList.add('block');
         }
+
+        try {
+          var url = new URL(window.location.href);
+          url.searchParams.set('tab', tabId);
+          window.history.replaceState(null, '', url.toString());
+        } catch (e) {}
       }
 
-      document.querySelectorAll('[data-nav-tab]').forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.getAttribute('data-nav-tab')));
+      document.querySelectorAll('[data-nav-tab]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          switchTab(btn.getAttribute('data-nav-tab'));
+        });
       });
 
-      // Ação Rápida (+ Nova Transação)
+      try {
+        var urlParams = new URLSearchParams(window.location.search);
+        var tabFromUrl = urlParams.get('tab') || window.location.hash.replace('#', '');
+        if (tabFromUrl && TAB_META[tabFromUrl]) {
+          switchTab(tabFromUrl);
+        }
+      } catch (e) {}
+
+      // Ação de Atualização Funcional (Header, Sidebar e Portfolio Sync)
+      function triggerRefreshAction() {
+        if (state.isRefreshing) return;
+        state.isRefreshing = true;
+
+        var refreshBtns = document.querySelectorAll(
+          '[data-testid="quick-refresh-btn"], [data-testid="sidebar-refresh-btn"], [data-testid="portfolio-sync-quotes-btn"]'
+        );
+
+        refreshBtns.forEach(function (btn) {
+          btn.setAttribute('aria-busy', 'true');
+          var svg = btn.querySelector('svg');
+          if (svg) svg.classList.add('animate-spin');
+        });
+
+        setTimeout(function () {
+          recalculateAndRender();
+          refreshBtns.forEach(function (btn) {
+            btn.setAttribute('aria-busy', 'false');
+            var svg = btn.querySelector('svg');
+            if (svg) svg.classList.remove('animate-spin');
+          });
+          state.isRefreshing = false;
+          showToast('Dados e cotações sincronizados com sucesso!');
+        }, 500);
+      }
+
+      document.querySelectorAll('[data-testid="quick-refresh-btn"], [data-testid="sidebar-refresh-btn"], [data-testid="portfolio-sync-quotes-btn"]')
+        .forEach(function (btn) { btn.addEventListener('click', triggerRefreshAction); });
+
       function setQuickActionExpanded(isExpanded) {
-        document.querySelectorAll('[data-testid="quick-new-transaction-btn"], [data-testid="sidebar-new-transaction-btn"]')
-          .forEach(btn => btn.setAttribute('aria-expanded', isExpanded ? 'true' : 'false'));
+        document.querySelectorAll('[data-testid="quick-new-transaction-btn"], [data-testid="sidebar-new-transaction-btn"], [data-testid="cashflow-add-btn"]')
+          .forEach(function (btn) { btn.setAttribute('aria-expanded', isExpanded ? 'true' : 'false'); });
       }
 
       function formatCurrencyBRL(value) {
-        const amount = Number(value) || 0;
+        var amount = Number(value) || 0;
         return amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       }
 
@@ -256,76 +456,187 @@ ${tokensCss}
       }
 
       function createTableRowElement(transaction) {
-        const tx = transaction || {};
-        const type = tx.categories?.type || 'EXPENSE';
-        const isIncome = type === 'INCOME';
-        const txId = escapeHtml(tx.id);
-        const description = escapeHtml(tx.description || 'Sem descrição');
-        const categoryName = escapeHtml(tx.categories?.name || 'Sem categoria');
-        const tr = document.createElement('tr');
+        var tx = transaction || {};
+        var type = tx.categories?.type || tx.category?.type || 'EXPENSE';
+        var isIncome = type === 'INCOME';
+        var txId = escapeHtml(tx.id);
+        var description = escapeHtml(tx.description || 'Sem descrição');
+        var categoryName = escapeHtml(tx.categories?.name || tx.category?.name || 'Sem categoria');
+        var tr = document.createElement('tr');
         tr.setAttribute('data-testid', 'transaction-row-' + txId);
         tr.setAttribute('data-transaction-id', txId);
         tr.className = 'border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors';
-        tr.innerHTML = \`
-          <td class="py-3.5 px-4 text-sm text-slate-300 whitespace-nowrap">\${String(tx.date || '').split('-').reverse().join('/')}</td>
-          <td class="py-3.5 px-4 text-sm font-medium text-slate-100">\${description}</td>
-          <td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">\${categoryName}</span></td>
-          <td class="py-3.5 px-4 text-sm whitespace-nowrap"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border \${isIncome ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60'}">\${isIncome ? 'Receita' : 'Despesa'}</span></td>
-          <td class="py-3.5 px-4 text-sm font-semibold text-right whitespace-nowrap \${isIncome ? 'text-emerald-400' : 'text-rose-400'}">\${isIncome ? '+' : '-'} R$ \${formatCurrencyBRL(tx.amount)}</td>
-          <td class="py-3.5 px-4 text-sm text-right whitespace-nowrap">
-            <button type="button" data-action="delete" data-tx-id="\${txId}" data-transaction-id="\${txId}" aria-label="Excluir transação \${description}" class="delete-btn touch-target inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors" style="min-height: 44px; min-width: 44px;">Excluir</button>
-          </td>
-        \`;
+        tr.innerHTML = [
+          '<td class="py-3.5 px-4 text-sm text-slate-300 whitespace-nowrap">' + String(tx.date || '').split('-').reverse().join('/') + '</td>',
+          '<td class="py-3.5 px-4 text-sm font-medium text-slate-100">' + description + '</td>',
+          '<td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + categoryName + '</span></td>',
+          '<td class="py-3.5 px-4 text-sm whitespace-nowrap"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ' + (isIncome ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60') + '">' + (isIncome ? 'Receita' : 'Despesa') + '</span></td>',
+          '<td class="py-3.5 px-4 text-sm font-semibold text-right whitespace-nowrap ' + (isIncome ? 'text-emerald-400' : 'text-rose-400') + '">' + (isIncome ? '+' : '-') + ' R$ ' + formatCurrencyBRL(tx.amount) + '</td>',
+          '<td class="py-3.5 px-4 text-sm text-right whitespace-nowrap">',
+          '  <button type="button" data-action="delete" data-tx-id="' + txId + '" data-transaction-id="' + txId + '" aria-label="Excluir transação ' + description + '" class="delete-btn touch-target inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors" style="min-height: 44px; min-width: 44px;">Excluir</button>',
+          '</td>'
+        ].join('');
         return tr;
       }
 
       function createMobileCardElement(transaction) {
-        const tx = transaction || {};
-        const type = tx.categories?.type || 'EXPENSE';
-        const isIncome = type === 'INCOME';
-        const txId = escapeHtml(tx.id);
-        const description = escapeHtml(tx.description || 'Sem descrição');
-        const categoryName = escapeHtml(tx.categories?.name || 'Sem categoria');
-        const li = document.createElement('li');
+        var tx = transaction || {};
+        var type = tx.categories?.type || tx.category?.type || 'EXPENSE';
+        var isIncome = type === 'INCOME';
+        var txId = escapeHtml(tx.id);
+        var description = escapeHtml(tx.description || 'Sem descrição');
+        var categoryName = escapeHtml(tx.categories?.name || tx.category?.name || 'Sem categoria');
+        var li = document.createElement('li');
         li.setAttribute('data-testid', 'transaction-card-' + txId);
         li.className = 'rounded-xl border border-slate-800 bg-slate-950/50 p-4 space-y-3';
-        li.innerHTML = \`
-          <div class="flex items-start justify-between gap-2">
-            <div>
-              <p class="text-sm font-semibold text-slate-100">\${description}</p>
-              <p class="text-xs text-slate-400 mt-1">\${String(tx.date || '').split('-').reverse().join('/')}</p>
-            </div>
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border \${isIncome ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60'}">\${isIncome ? 'Receita' : 'Despesa'}</span>
-          </div>
-          <div class="flex items-center justify-between gap-2">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">\${categoryName}</span>
-            <span class="text-sm font-semibold \${isIncome ? 'text-emerald-400' : 'text-rose-400'}">\${isIncome ? '+' : '-'} R$ \${formatCurrencyBRL(tx.amount)}</span>
-          </div>
-          <button type="button" data-action="delete" data-tx-id="\${txId}" data-transaction-id="\${txId}" aria-label="Excluir transação \${description}" class="delete-btn touch-target w-full inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors" style="min-height: 44px; min-width: 44px;">Excluir</button>
-        \`;
+        li.innerHTML = [
+          '<div class="flex items-start justify-between gap-2">',
+          '  <div>',
+          '    <p class="text-sm font-semibold text-slate-100">' + description + '</p>',
+          '    <p class="text-xs text-slate-400 mt-1">' + String(tx.date || '').split('-').reverse().join('/') + '</p>',
+          '  </div>',
+          '  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ' + (isIncome ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60') + '">' + (isIncome ? 'Receita' : 'Despesa') + '</span>',
+          '</div>',
+          '<div class="flex items-center justify-between gap-2">',
+          '  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + categoryName + '</span>',
+          '  <span class="text-sm font-semibold ' + (isIncome ? 'text-emerald-400' : 'text-rose-400') + '">' + (isIncome ? '+' : '-') + ' R$ ' + formatCurrencyBRL(tx.amount) + '</span>',
+          '</div>',
+          '<button type="button" data-action="delete" data-tx-id="' + txId + '" data-transaction-id="' + txId + '" aria-label="Excluir transação ' + description + '" class="delete-btn touch-target w-full inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 disabled:opacity-50 transition-colors" style="min-height: 44px; min-width: 44px;">Excluir</button>'
+        ].join('');
+        return li;
+      }
+
+      function createCashflowRowElement(transaction) {
+        var tx = transaction || {};
+        var type = tx.category?.type || tx.categories?.type || 'EXPENSE';
+        var isIncome = type === 'INCOME';
+        var txId = escapeHtml(tx.id);
+        var description = escapeHtml(tx.description || 'Sem descrição');
+        var categoryName = escapeHtml(tx.category?.name || tx.categories?.name || 'Sem categoria');
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-testid', 'cashflow-row-' + txId);
+        tr.setAttribute('data-cashflow-tx-id', txId);
+        tr.setAttribute('data-tx-type', type);
+        tr.className = 'border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors';
+        tr.innerHTML = [
+          '<td class="py-3.5 px-4 text-sm text-slate-300 whitespace-nowrap">' + String(tx.date || '').split('-').reverse().join('/') + '</td>',
+          '<td class="py-3.5 px-4 text-sm font-medium text-slate-100">' + description + '</td>',
+          '<td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + categoryName + '</span></td>',
+          '<td class="py-3.5 px-4 text-sm whitespace-nowrap"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ' + (isIncome ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60') + '">' + (isIncome ? 'Receita' : 'Despesa') + '</span></td>',
+          '<td class="py-3.5 px-4 text-sm font-semibold text-right whitespace-nowrap ' + (isIncome ? 'text-emerald-400' : 'text-rose-400') + '">' + (isIncome ? '+' : '-') + ' R$ ' + formatCurrencyBRL(tx.amount) + '</td>',
+          '<td class="py-3.5 px-4 text-sm text-right whitespace-nowrap">',
+          '  <button type="button" data-action="delete" data-tx-id="' + txId + '" aria-label="Excluir transação ' + description + '" class="delete-btn touch-target inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 transition-colors" style="min-height: 44px; min-width: 44px;">Excluir</button>',
+          '</td>'
+        ].join('');
+        return tr;
+      }
+
+      function createCashflowMobileCardElement(transaction) {
+        var tx = transaction || {};
+        var type = tx.category?.type || tx.categories?.type || 'EXPENSE';
+        var isIncome = type === 'INCOME';
+        var txId = escapeHtml(tx.id);
+        var description = escapeHtml(tx.description || 'Sem descrição');
+        var categoryName = escapeHtml(tx.category?.name || tx.categories?.name || 'Sem categoria');
+        var li = document.createElement('li');
+        li.setAttribute('data-testid', 'cashflow-mobile-card-' + txId);
+        li.setAttribute('data-cashflow-tx-id', txId);
+        li.setAttribute('data-tx-type', type);
+        li.className = 'rounded-xl border border-slate-800 bg-slate-950/50 p-4 space-y-3';
+        li.innerHTML = [
+          '<div class="flex items-start justify-between gap-2">',
+          '  <div>',
+          '    <p class="text-sm font-semibold text-slate-100">' + description + '</p>',
+          '    <p class="text-xs text-slate-400 mt-1">' + String(tx.date || '').split('-').reverse().join('/') + '</p>',
+          '  </div>',
+          '  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ' + (isIncome ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60') + '">' + (isIncome ? 'Receita' : 'Despesa') + '</span>',
+          '</div>',
+          '<div class="flex items-center justify-between gap-2">',
+          '  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + categoryName + '</span>',
+          '  <span class="text-sm font-semibold ' + (isIncome ? 'text-emerald-400' : 'text-rose-400') + '">' + (isIncome ? '+' : '-') + ' R$ ' + formatCurrencyBRL(tx.amount) + '</span>',
+          '</div>',
+          '<button type="button" data-action="delete" data-tx-id="' + txId + '" aria-label="Excluir transação ' + description + '" class="delete-btn touch-target w-full inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 transition-colors" style="min-height: 44px; min-width: 44px;">Excluir</button>'
+        ].join('');
         return li;
       }
 
       function prependTransactionViews(transaction) {
-        const tbody = document.querySelector('[data-testid="transactions-table-body"]');
-        if (tbody) {
-          tbody.prepend(createTableRowElement(transaction));
-        }
-        const mobileList = document.querySelector('[data-testid="transactions-mobile-list"]');
-        if (mobileList) {
-          mobileList.prepend(createMobileCardElement(transaction));
-        }
+        var tbody = document.querySelector('[data-testid="transactions-table-body"]');
+        if (tbody) tbody.prepend(createTableRowElement(transaction));
+        var mobileList = document.querySelector('[data-testid="transactions-mobile-list"]');
+        if (mobileList) mobileList.prepend(createMobileCardElement(transaction));
+
+        var cashflowBody = document.getElementById('cashflow-table-body');
+        if (cashflowBody) cashflowBody.prepend(createCashflowRowElement(transaction));
+        var cashflowMobileList = document.getElementById('cashflow-mobile-list');
+        if (cashflowMobileList) cashflowMobileList.prepend(createCashflowMobileCardElement(transaction));
       }
 
       function removeTransactionViews(transactionId) {
-        const row = document.querySelector('[data-testid="transaction-row-' + transactionId + '"]');
+        var row = document.querySelector('[data-testid="transaction-row-' + transactionId + '"]');
         if (row) row.remove();
-        const card = document.querySelector('[data-testid="transaction-card-' + transactionId + '"]');
+        var card = document.querySelector('[data-testid="transaction-card-' + transactionId + '"]');
         if (card) card.remove();
+
+        var cfRow = document.querySelector('[data-testid="cashflow-row-' + transactionId + '"]');
+        if (cfRow) cfRow.remove();
+        var cfCard = document.querySelector('[data-testid="cashflow-mobile-card-' + transactionId + '"]');
+        if (cfCard) cfCard.remove();
       }
 
+      function applyCashflowFilters() {
+        var searchTerm = (state.cashflowSearch || '').toLowerCase().trim();
+        var filterType = state.cashflowFilter;
+
+        var visibleCount = 0;
+
+        var updateItem = function (el) {
+          var txType = el.getAttribute('data-tx-type');
+          var text = (el.textContent || '').toLowerCase();
+          var matchesType = filterType === 'ALL' || txType === filterType;
+          var matchesSearch = !searchTerm || text.includes(searchTerm);
+
+          if (matchesType && matchesSearch) {
+            el.style.display = '';
+            visibleCount++;
+          } else {
+            el.style.display = 'none';
+          }
+        };
+
+        document.querySelectorAll('#cashflow-table-body tr[data-cashflow-tx-id]').forEach(updateItem);
+        document.querySelectorAll('#cashflow-mobile-list li[data-cashflow-tx-id]').forEach(updateItem);
+
+        var countElem = document.getElementById('cashflow-visible-count');
+        if (countElem) {
+          countElem.textContent = String(Math.floor(visibleCount / 2) || visibleCount);
+        }
+      }
+
+      document.querySelectorAll('.filter-pill').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          state.cashflowFilter = btn.getAttribute('data-filter-type') || 'ALL';
+          document.querySelectorAll('.filter-pill').forEach(function (p) {
+            p.classList.remove('bg-indigo-600', 'text-white');
+            p.classList.add('bg-slate-800', 'text-slate-300');
+          });
+          btn.classList.add('bg-indigo-600', 'text-white');
+          btn.classList.remove('bg-slate-800', 'text-slate-300');
+          applyCashflowFilters();
+        });
+      });
+
+      var searchInput = document.getElementById('cashflow-search');
+      if (searchInput) {
+        searchInput.addEventListener('input', function (e) {
+          state.cashflowSearch = e.target.value;
+          applyCashflowFilters();
+        });
+      }
+
+      // Modal / Bottom Sheet de Nova Transação
       function toggleNewTransactionForm() {
-        const existingModal = document.getElementById('quick-transaction-modal');
+        var existingModal = document.getElementById('quick-transaction-modal');
         if (existingModal) {
           existingModal.remove();
           state.isFormOpen = false;
@@ -333,47 +644,48 @@ ${tokensCss}
           return;
         }
 
-        const modal = document.createElement('div');
+        var modal = document.createElement('div');
         modal.id = 'quick-transaction-modal';
         modal.className = 'fixed inset-0 z-50 flex items-end md:items-center justify-center';
-        modal.innerHTML = \`
-          <button type="button" data-testid="quick-transaction-backdrop" aria-label="Fechar formulário de nova transação" class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"></button>
-          <div role="dialog" aria-modal="true" aria-label="Nova Transação" class="relative w-full md:max-w-2xl max-h-[90vh] overflow-y-auto rounded-t-2xl md:rounded-2xl border border-slate-800 bg-slate-900 p-4 md:p-6 shadow-2xl" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-base font-bold text-slate-100">+ Nova Transação Manual</h3>
-              <button type="button" id="close-modal-btn" class="touch-target inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700" style="min-height: 44px; min-width: 44px;">
-                Fechar
-              </button>
-            </div>
-            <form id="inline-tx-form" class="space-y-4">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-xs font-medium text-slate-300 mb-1">Valor (R$)</label>
-                  <input type="number" step="0.01" min="0.01" id="tx-amount" required placeholder="0,00" inputmode="decimal" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;" />
-                </div>
-                <div>
-                  <label class="block text-xs font-medium text-slate-300 mb-1">Data</label>
-                  <input type="date" id="tx-date" required value="\${new Date().toISOString().slice(0, 10)}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;" />
-                </div>
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-slate-300 mb-1">Descrição</label>
-                <input type="text" id="tx-description" placeholder="Ex: Supermercado, Aluguel, Pro-labore" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;" />
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-slate-300 mb-1">Categoria</label>
-                <select id="tx-category" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;">
-                  \${state.categories.map(c => \`<option value="\${escapeHtml(c.id)}">\${escapeHtml(c.name)} (\${escapeHtml(c.type)})</option>\`).join('')}
-                </select>
-              </div>
-              <button type="submit" class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm py-2.5 transition-colors" style="min-height: 48px;">
-                Salvar Transação
-              </button>
-            </form>
-          </div>
-        \`;
 
-        const closeModal = () => {
+        var categoryOptions = state.categories.map(function (c) {
+          return '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + ' (' + escapeHtml(c.type) + ')</option>';
+        }).join('');
+
+        modal.innerHTML = [
+          '<button type="button" data-testid="quick-transaction-backdrop" aria-label="Fechar formulário de nova transação" class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"></button>',
+          '<div role="dialog" aria-modal="true" aria-label="Nova Transação" class="relative w-full md:max-w-2xl max-h-[90vh] overflow-y-auto rounded-t-2xl md:rounded-2xl border border-slate-800 bg-slate-900 p-4 md:p-6 shadow-2xl" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));">',
+          '  <div class="flex items-center justify-between mb-4">',
+          '    <h3 class="text-base font-bold text-slate-100">+ Nova Transação Manual</h3>',
+          '    <button type="button" id="close-modal-btn" class="touch-target inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700" style="min-height: 44px; min-width: 44px;">Fechar</button>',
+          '  </div>',
+          '  <form id="inline-tx-form" class="space-y-4">',
+          '    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">',
+          '      <div>',
+          '        <label class="block text-xs font-medium text-slate-300 mb-1">Valor (R$)</label>',
+          '        <input type="number" step="0.01" min="0.01" id="tx-amount" required placeholder="0,00" inputmode="decimal" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;" />',
+          '      </div>',
+          '      <div>',
+          '        <label class="block text-xs font-medium text-slate-300 mb-1">Data</label>',
+          '        <input type="date" id="tx-date" required value="' + new Date().toISOString().slice(0, 10) + '" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;" />',
+          '      </div>',
+          '    </div>',
+          '    <div>',
+          '      <label class="block text-xs font-medium text-slate-300 mb-1">Descrição</label>',
+          '      <input type="text" id="tx-description" placeholder="Ex: Supermercado, Aluguel, Pro-labore" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;" />',
+          '    </div>',
+          '    <div>',
+          '      <label class="block text-xs font-medium text-slate-300 mb-1">Categoria</label>',
+          '      <select id="tx-category" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-50" style="min-height: 44px;">',
+          categoryOptions,
+          '      </select>',
+          '    </div>',
+          '    <button type="submit" class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm py-2.5 transition-colors" style="min-height: 48px;">Salvar Transação</button>',
+          '  </form>',
+          '</div>'
+        ].join('');
+
+        var closeModal = function () {
           modal.remove();
           document.removeEventListener('keydown', handleEscKey);
           state.isFormOpen = false;
@@ -389,25 +701,25 @@ ${tokensCss}
         state.isFormOpen = true;
         setQuickActionExpanded(true);
 
-        const closeButton = modal.querySelector('#close-modal-btn');
-        const backdropButton = modal.querySelector('[data-testid="quick-transaction-backdrop"]');
+        var closeButton = modal.querySelector('#close-modal-btn');
+        var backdropButton = modal.querySelector('[data-testid="quick-transaction-backdrop"]');
         if (closeButton) closeButton.addEventListener('click', closeModal);
         if (backdropButton) backdropButton.addEventListener('click', closeModal);
 
-        const form = modal.querySelector('#inline-tx-form');
+        var form = modal.querySelector('#inline-tx-form');
         if (form) {
-          form.addEventListener('submit', (e) => {
+          form.addEventListener('submit', function (e) {
             e.preventDefault();
-            const amount = parseFloat(document.getElementById('tx-amount').value);
-            const date = document.getElementById('tx-date').value;
-            const description = document.getElementById('tx-description').value;
-            const categoryId = document.getElementById('tx-category').value;
-            const cat = state.categories.find(c => c.id === categoryId) || { name: 'Geral', type: 'EXPENSE' };
+            var amount = parseFloat(document.getElementById('tx-amount').value);
+            var date = document.getElementById('tx-date').value;
+            var description = document.getElementById('tx-description').value;
+            var categoryId = document.getElementById('tx-category').value;
+            var cat = state.categories.find(function (c) { return c.id === categoryId; }) || { name: 'Geral', type: 'EXPENSE' };
 
-            const newTx = {
+            var newTx = {
               id: 'tx-' + Date.now(),
-              amount,
-              date,
+              amount: amount,
+              date: date,
               description: description || 'Lançamento manual',
               category_id: categoryId,
               category: cat,
@@ -418,54 +730,63 @@ ${tokensCss}
             state.transactions.unshift(newTx);
             closeModal();
             recalculateAndRender({ prependTransaction: newTx });
+            showToast('Transação adicionada com sucesso!');
           });
         }
       }
 
-      document.querySelectorAll('[data-testid="quick-new-transaction-btn"], [data-testid="sidebar-new-transaction-btn"]')
-        .forEach(btn => btn.addEventListener('click', toggleNewTransactionForm));
+      document.querySelectorAll('[data-testid="quick-new-transaction-btn"], [data-testid="sidebar-new-transaction-btn"], [data-testid="cashflow-add-btn"]')
+        .forEach(function (btn) { btn.addEventListener('click', toggleNewTransactionForm); });
       setQuickActionExpanded(false);
 
-      // Sincronização reativa de KPIs e Tabela
-      function recalculateAndRender({ prependTransaction = null } = {}) {
-        let totalIncome = 0;
-        let totalExpenses = 0;
+      // Sincronização reativa de KPIs, Tabela e Fluxo de Caixa
+      function recalculateAndRender(opts) {
+        var prependTx = (opts && opts.prependTransaction) || null;
+        var totalIncome = 0;
+        var totalExpenses = 0;
 
-        for (const t of state.transactions) {
-          const type = t.categories?.type;
-          const val = Number(t.amount) || 0;
+        for (var i = 0; i < state.transactions.length; i++) {
+          var t = state.transactions[i];
+          var type = t.categories?.type || t.category?.type;
+          var val = Number(t.amount) || 0;
           if (type === 'INCOME') totalIncome += val;
           else if (type === 'EXPENSE') totalExpenses += val;
         }
 
-        const netBalance = totalIncome - totalExpenses;
-        const burnRatePct = state.monthlyBudget > 0 ? (totalExpenses / state.monthlyBudget) * 100 : 0;
+        var netBalance = totalIncome - totalExpenses;
+        var burnRatePct = state.monthlyBudget > 0 ? (totalExpenses / state.monthlyBudget) * 100 : 0;
 
-        // Atualiza Card de Saldo Líquido
-        const balanceElem = document.querySelector('[data-testid="kpi-card-liquidity"] [data-testid="kpi-value"]');
+        var balanceElem = document.querySelector('[data-testid="kpi-card-liquidity"] [data-testid="kpi-value"]');
         if (balanceElem) {
           balanceElem.textContent = 'R$ ' + netBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
-        // Atualiza Card de Burn Rate
-        const burnRateElem = document.querySelector('[data-testid="kpi-card-burn-rate"] [data-testid="kpi-value"]');
+        var burnRateElem = document.querySelector('[data-testid="kpi-card-burn-rate"] [data-testid="kpi-value"]');
         if (burnRateElem) {
           burnRateElem.textContent = burnRatePct.toFixed(1) + '%';
         }
 
-        if (prependTransaction) {
-          prependTransactionViews(prependTransaction);
+        var cfIncome = document.querySelector('[data-testid="cashflow-income-total"]');
+        if (cfIncome) cfIncome.textContent = '+ R$ ' + formatCurrencyBRL(totalIncome);
+        var cfExpense = document.querySelector('[data-testid="cashflow-expense-total"]');
+        if (cfExpense) cfExpense.textContent = '- R$ ' + formatCurrencyBRL(totalExpenses);
+        var cfNet = document.querySelector('[data-testid="cashflow-net-total"]');
+        if (cfNet) cfNet.textContent = 'R$ ' + formatCurrencyBRL(netBalance);
+
+        if (prependTx) {
+          prependTransactionViews(prependTx);
         }
       }
 
-      // Handler para exclusão de transações
-      document.addEventListener('click', (e) => {
+      // Handler Unificado para exclusão de transações
+      document.addEventListener('click', function (e) {
         if (e.target && e.target.classList.contains('delete-btn')) {
-          const txId = e.target.getAttribute('data-tx-id');
+          var txId = e.target.getAttribute('data-tx-id') || e.target.getAttribute('data-transaction-id');
           if (txId) {
-            state.transactions = state.transactions.filter(t => t.id !== txId);
+            state.transactions = state.transactions.filter(function (t) { return t.id !== txId; });
             removeTransactionViews(txId);
             recalculateAndRender();
+            showToast('Transação excluída com sucesso!');
           }
         }
       });
