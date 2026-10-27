@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { authRateLimiter, apiRateLimiter } = require('./src/middlewares/rateLimit.middleware');
 const { renderAppPage } = require('./src/frontend/pages/renderAppPage');
-const { renderAuthPage } = require('./src/frontend/pages/renderAuthPage');
+const { renderLandingPage } = require('./src/frontend/pages/renderLandingPage');
 
 const app = express();
 
@@ -42,16 +42,14 @@ router.get(['/dashboard', '/app'], (req, res) => {
   res.status(200).send(renderAppPage());
 });
 
-// Rotas Visuais de Autenticação (/login, /signup) e Acesso (E05.T03)
-// codeql[js/missing-rate-limiting] Rotas GET SSR protegidas por apiRateLimiter; autenticação de credenciais ocorre em POST /api/auth/login
+// Rotas Visuais de Acesso (/login, /signup, /auth-view)
 router.get(['/login', '/signup', '/auth-view'], apiRateLimiter, (req, res) => {
   const mode = req.path.includes('signup') ? 'signup' : 'login';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.status(200).send(renderAuthPage({ mode }));
+  res.status(200).send(renderLandingPage({ mode }));
 });
 
-// Rota Raiz: Serve a interface web (Tela de Login/Acesso) para navegadores e preserva JSON para API
-// codeql[js/missing-rate-limiting] Rota GET raiz protegida por apiRateLimiter que serve UI de acesso aos navegadores
+// Rota Raiz: Serve a interface web de acesso para navegadores e preserva JSON para API
 router.get('/', apiRateLimiter, (req, res) => {
   const isHtmlBrowserRequest = Boolean(
     req.headers.accept &&
@@ -62,7 +60,7 @@ router.get('/', apiRateLimiter, (req, res) => {
 
   if (isHtmlBrowserRequest) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(renderAuthPage({ mode: 'login' }));
+    return res.status(200).send(renderLandingPage({ mode: 'login' }));
   }
 
   res.status(200).json({ status: "ok", service: "PersonalController API", timestamp: new Date().toISOString() });

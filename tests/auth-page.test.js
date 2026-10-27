@@ -1,10 +1,10 @@
 const request = require('supertest');
 const app = require('../server');
-const { renderAuthPage } = require('../src/frontend/pages/renderAuthPage');
+const { renderLandingPage, renderAuthPage } = require('../src/frontend/pages/renderLandingPage');
 
 describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /signup) e Root Deploy', () => {
-  test('1. renderAuthPage() gera documento HTML5 com doctype, tokens de design e markup de login', () => {
-    const html = renderAuthPage({ mode: 'login' });
+  test('1. renderLandingPage() gera documento HTML5 com doctype, tokens de design e markup de login', () => {
+    const html = renderLandingPage({ mode: 'login' });
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<html lang="pt-BR" data-theme="dark">');
     expect(html).toContain('data-testid="auth-view"');
@@ -14,8 +14,8 @@ describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /
     expect(html).toContain('<style id="pc-design-tokens">');
   });
 
-  test('2. renderAuthPage({ mode: "signup" }) gera documento em modo cadastro', () => {
-    const html = renderAuthPage({ mode: 'signup' });
+  test('2. renderLandingPage({ mode: "signup" }) gera documento em modo cadastro', () => {
+    const html = renderLandingPage({ mode: 'signup' });
     expect(html).toContain('data-auth-mode="signup"');
     expect(html).toContain('Criar Conta Segura');
   });

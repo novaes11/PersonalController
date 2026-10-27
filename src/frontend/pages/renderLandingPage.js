@@ -13,7 +13,7 @@ const { renderAuthViewMarkup } = require('../components/AuthView');
  * @param {'dark'|'light'} [options.theme='dark']
  * @returns {string} Documento HTML5 renderizado
  */
-function renderAuthPage(options = {}) {
+function renderLandingPage(options = {}) {
   const {
     mode = 'login',
     email = '',
@@ -266,5 +266,6 @@ ${tokensCss}
 }
 
 module.exports = {
-  renderAuthPage
+  renderLandingPage,
+  renderAuthPage: renderLandingPage
 };
