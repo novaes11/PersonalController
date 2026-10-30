@@ -217,10 +217,13 @@ ${tokensCss}
   <!-- Runtime Interativo SPA do Cliente (E06.T02) -->
   <script>
     (function () {
-      // Estado reativo em memória
+      // Estado reativo em memória (E06.T02 & E06.T03)
       var state = {
         theme: '${normalizedTheme}',
         activeTab: '${activeTab}',
+        isDemo: true,
+        token: null,
+        user: ${JSON.stringify(demoData.user)},
         isFormOpen: false,
         isRefreshing: false,
         cashflowFilter: 'ALL',
@@ -311,19 +314,28 @@ ${tokensCss}
         });
       });
 
-      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações
+      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações (E06.T03)
       try {
         var rawSession = localStorage.getItem('pc_auth_session') || sessionStorage.getItem('pc_auth_session');
         if (rawSession) {
           var parsedSession = JSON.parse(rawSession);
           var sessionUser = parsedSession && parsedSession.user;
+          var rawToken = parsedSession && typeof parsedSession.token === 'string' ? parsedSession.token.trim() : '';
+          var isRealAuthSession = parsedSession && parsedSession.isDemo === false && rawToken && !rawToken.startsWith('demo-token-');
+
+          state.isDemo = !isRealAuthSession;
+          state.token = isRealAuthSession ? rawToken : null; // allowlist-secret
+          if (sessionUser) {
+            state.user = sessionUser;
+          }
+
           if (sessionUser && sessionUser.email) {
-            var indicatorLabel = parsedSession.isDemo ? 'Modo Demonstração' : sessionUser.email;
+            var indicatorLabel = state.isDemo ? 'Modo Demonstração' : sessionUser.email;
             document.querySelectorAll('[data-testid="account-indicator"], [data-testid="sidebar-account-indicator"]')
               .forEach(function (el) { el.textContent = indicatorLabel; });
             var settingsEmailEl = document.querySelector('[data-testid="settings-user-email"]');
             if (settingsEmailEl) {
-              settingsEmailEl.textContent = parsedSession.isDemo
+              settingsEmailEl.textContent = state.isDemo
                 ? sessionUser.email + ' (Modo Demonstração)'
                 : sessionUser.email;
             }
@@ -425,7 +437,7 @@ ${tokensCss}
         }
       } catch (e) {}
 
-      // Ação de Atualização Funcional (Header, Sidebar e Portfolio Sync)
+      // Ação de Atualização Funcional (Header, Sidebar e Portfolio Sync) — Suporte Demo & API Real (E06.T03)
       function triggerRefreshAction() {
         if (state.isRefreshing) return;
         state.isRefreshing = true;
@@ -440,14 +452,23 @@ ${tokensCss}
           if (svg) svg.classList.add('animate-spin');
         });
 
-        setTimeout(function () {
-          recalculateAndRender();
+        function finishSpin() {
           refreshBtns.forEach(function (btn) {
             btn.setAttribute('aria-busy', 'false');
             var svg = btn.querySelector('svg');
             if (svg) svg.classList.remove('animate-spin');
           });
           state.isRefreshing = false;
+        }
+
+        if (!state.isDemo && state.token) {
+          syncFromSupabaseApi({ refreshPortfolio: true, silent: false }).finally(finishSpin);
+          return;
+        }
+
+        setTimeout(function () {
+          recalculateAndRender();
+          finishSpin();
           showToast('Dados e cotações sincronizados com sucesso!');
         }, 500);
       }
@@ -728,13 +749,66 @@ ${tokensCss}
 
         var form = modal.querySelector('#inline-tx-form');
         if (form) {
-          form.addEventListener('submit', function (e) {
+          form.addEventListener('submit', async function (e) {
             e.preventDefault();
             var amount = parseFloat(document.getElementById('tx-amount').value);
             var date = document.getElementById('tx-date').value;
             var description = document.getElementById('tx-description').value;
             var categoryId = document.getElementById('tx-category').value;
             var cat = state.categories.find(function (c) { return c.id === categoryId; }) || { name: 'Geral', type: 'EXPENSE' };
+
+            if (!state.isDemo && state.token) {
+              var submitBtn = form.querySelector('button[type="submit"]');
+              if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Salvando...';
+              }
+              try {
+                var isUuid = categoryId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(categoryId);
+                var payload = {
+                  amount: Number(amount.toFixed(2)),
+                  date: date,
+                  category_id: isUuid ? categoryId : null,
+                  description: description ? description.trim() : null,
+                  is_automated: false
+                };
+                var res = await fetch('/api/transactions', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Authorization': 'Bearer ' + state.token
+                  },
+                  body: JSON.stringify(payload)
+                });
+                var body = await res.json();
+                if (!res.ok || body.status === 'error') {
+                  showToast(body.message || 'Erro ao salvar transação na API.', 'error');
+                  if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Salvar Transação';
+                  }
+                  return;
+                }
+                var createdTx = body.data || {};
+                var resolvedCat = createdTx.category || cat;
+                var normalizedCreatedTx = Object.assign({}, createdTx, {
+                  category: resolvedCat,
+                  categories: resolvedCat
+                });
+                state.transactions.unshift(normalizedCreatedTx);
+                closeModal();
+                recalculateAndRender({ rebuildLists: true });
+                showToast('Transação adicionada com sucesso!');
+              } catch (err) {
+                showToast('Falha de conexão ao salvar transação.', 'error');
+                if (submitBtn) {
+                  submitBtn.disabled = false;
+                  submitBtn.textContent = 'Salvar Transação';
+                }
+              }
+              return;
+            }
 
             var newTx = {
               id: 'tx-' + Date.now(),
@@ -759,9 +833,108 @@ ${tokensCss}
         .forEach(function (btn) { btn.addEventListener('click', toggleNewTransactionForm); });
       setQuickActionExpanded(false);
 
+      // Renderização completa de Tabelas, Portfólio e Categorias a partir de state (E06.T03)
+      function rebuildAllListsInDom() {
+        var overviewTbody = document.querySelector('[data-testid="transactions-table-body"]');
+        var overviewMobileList = document.querySelector('[data-testid="transactions-mobile-list"]');
+        var cashflowTbody = document.getElementById('cashflow-table-body');
+        var cashflowMobileList = document.getElementById('cashflow-mobile-list');
+
+        if (overviewTbody) {
+          overviewTbody.innerHTML = '';
+          var recentTx = state.transactions.slice(0, 8);
+          if (recentTx.length === 0) {
+            overviewTbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">Nenhuma transação encontrada neste período.</td></tr>';
+          } else {
+            recentTx.forEach(function (tx) { overviewTbody.appendChild(createTableRowElement(tx)); });
+          }
+        }
+
+        if (overviewMobileList) {
+          overviewMobileList.innerHTML = '';
+          var recentMobileTx = state.transactions.slice(0, 8);
+          if (recentMobileTx.length === 0) {
+            overviewMobileList.innerHTML = '<li class="py-8 text-center text-sm text-slate-400">Nenhuma transação encontrada neste período.</li>';
+          } else {
+            recentMobileTx.forEach(function (tx) { overviewMobileList.appendChild(createMobileCardElement(tx)); });
+          }
+        }
+
+        if (cashflowTbody) {
+          cashflowTbody.innerHTML = '';
+          if (state.transactions.length === 0) {
+            cashflowTbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">Nenhum lançamento encontrado.</td></tr>';
+          } else {
+            state.transactions.forEach(function (tx) { cashflowTbody.appendChild(createCashflowRowElement(tx)); });
+          }
+        }
+
+        if (cashflowMobileList) {
+          cashflowMobileList.innerHTML = '';
+          if (state.transactions.length === 0) {
+            cashflowMobileList.innerHTML = '<li class="py-8 text-center text-sm text-slate-400">Nenhum lançamento encontrado.</li>';
+          } else {
+            state.transactions.forEach(function (tx) { cashflowMobileList.appendChild(createCashflowMobileCardElement(tx)); });
+          }
+        }
+
+        var filterAllBtn = document.querySelector('[data-testid="filter-all-btn"]');
+        if (filterAllBtn) {
+          filterAllBtn.textContent = 'Todas (' + state.transactions.length + ')';
+        }
+        applyCashflowFilters();
+
+        // Atualiza Portfólio Consolidado
+        var portfolioTotal = Number(state.portfolio && state.portfolio.total_portfolio_value) || 0;
+        var portfolioTotalFmt = 'R$ ' + formatCurrencyBRL(portfolioTotal);
+        document.querySelectorAll('[data-testid="portfolio-total-value"], [data-portfolio-total="true"]')
+          .forEach(function (el) { el.textContent = portfolioTotalFmt; });
+
+        var portfolioTableBody = document.querySelector('[data-testid="portfolio-positions-table"] tbody');
+        if (portfolioTableBody && state.portfolio && Array.isArray(state.portfolio.positions)) {
+          var positions = state.portfolio.positions;
+          if (positions.length === 0) {
+            portfolioTableBody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">Nenhum ativo cadastrado.</td></tr>';
+          } else {
+            portfolioTableBody.innerHTML = positions.map(function (pos) {
+              var ticker = escapeHtml(pos.ticker);
+              var qty = Number(pos.quantity) || 1;
+              var curPrice = Number(pos.current_price) || 0;
+              var posTotal = Number(pos.current_value) || (qty * curPrice);
+              var weightPct = portfolioTotal > 0 ? ((posTotal / portfolioTotal) * 100).toFixed(1) : '0.0';
+              return '<tr data-testid="portfolio-pos-row-' + ticker + '" class="border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors">' +
+                '<td class="py-3.5 px-4 text-sm font-semibold text-slate-100">' + ticker + '</td>' +
+                '<td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + escapeHtml(pos.asset_type || 'Outros') + '</span></td>' +
+                '<td class="py-3.5 px-4 text-sm text-slate-300 tabular-nums">' + qty + '</td>' +
+                '<td class="py-3.5 px-4 text-sm text-slate-300 tabular-nums">R$ ' + formatCurrencyBRL(curPrice) + '</td>' +
+                '<td class="py-3.5 px-4 text-sm font-semibold text-right text-slate-100 tabular-nums">R$ ' + formatCurrencyBRL(posTotal) + '</td>' +
+                '<td class="py-3.5 px-4 text-sm text-right text-indigo-400 font-semibold tabular-nums">' + weightPct + '%</td>' +
+                '</tr>';
+            }).join('');
+          }
+        }
+
+        // Atualiza Categorias na aba Configurações
+        var settingsCatList = document.querySelector('[data-testid="settings-categories-card"] ul');
+        if (settingsCatList && Array.isArray(state.categories)) {
+          if (state.categories.length === 0) {
+            settingsCatList.innerHTML = '<li class="text-xs text-slate-400">Nenhuma categoria encontrada.</li>';
+          } else {
+            settingsCatList.innerHTML = state.categories.map(function (cat) {
+              var isInc = cat.type === 'INCOME';
+              return '<li data-testid="settings-category-' + escapeHtml(cat.id) + '" class="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-950/40 border border-slate-800/80">' +
+                '<span class="text-sm font-medium text-slate-200">' + escapeHtml(cat.name) + '</span>' +
+                '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ' + (isInc ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60' : 'bg-rose-950/70 text-rose-300 border-rose-800/60') + '">' + (isInc ? 'Receita' : 'Despesa') + '</span>' +
+                '</li>';
+            }).join('');
+          }
+        }
+      }
+
       // Sincronização reativa de KPIs, Tabela e Fluxo de Caixa
       function recalculateAndRender(opts) {
         var prependTx = (opts && opts.prependTransaction) || null;
+        var rebuildLists = Boolean(opts && opts.rebuildLists);
         var totalIncome = 0;
         var totalExpenses = 0;
 
@@ -775,16 +948,19 @@ ${tokensCss}
 
         var netBalance = totalIncome - totalExpenses;
         var burnRatePct = state.monthlyBudget > 0 ? (totalExpenses / state.monthlyBudget) * 100 : 0;
+        var formattedBalance = (netBalance < 0 ? '-R$ ' : 'R$ ') + formatCurrencyBRL(Math.abs(netBalance));
 
-        var balanceElem = document.querySelector('[data-testid="kpi-card-liquidity"] [data-testid="kpi-value"]');
-        if (balanceElem) {
-          balanceElem.textContent = 'R$ ' + netBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
+        document.querySelectorAll('[data-kpi-value="net_balance"], [data-testid="kpi-card-liquidity"] [data-testid="kpi-value"]')
+          .forEach(function (el) { el.textContent = formattedBalance; });
 
-        var burnRateElem = document.querySelector('[data-testid="kpi-card-burn-rate"] [data-testid="kpi-value"]');
-        if (burnRateElem) {
-          burnRateElem.textContent = burnRatePct.toFixed(1) + '%';
-        }
+        document.querySelectorAll('[data-kpi-value="total_income"]')
+          .forEach(function (el) { el.textContent = 'R$ ' + formatCurrencyBRL(totalIncome); });
+
+        document.querySelectorAll('[data-kpi-value="total_expense"]')
+          .forEach(function (el) { el.textContent = 'R$ ' + formatCurrencyBRL(totalExpenses); });
+
+        document.querySelectorAll('[data-kpi-value="burn_rate_percentage"], [data-testid="kpi-card-burn-rate"] [data-testid="kpi-value"]')
+          .forEach(function (el) { el.textContent = burnRatePct.toFixed(1) + '%'; });
 
         var cfIncome = document.querySelector('[data-testid="cashflow-income-total"]');
         if (cfIncome) cfIncome.textContent = '+ R$ ' + formatCurrencyBRL(totalIncome);
@@ -796,13 +972,124 @@ ${tokensCss}
         if (prependTx) {
           prependTransactionViews(prependTx);
         }
+        if (rebuildLists) {
+          rebuildAllListsInDom();
+        }
       }
 
-      // Handler Unificado para exclusão de transações
-      document.addEventListener('click', function (e) {
+      // Sincronização de Dados Reais da API Supabase quando autenticado (E06.T03)
+      async function syncFromSupabaseApi(options) {
+        var opts = options || {};
+        if (state.isDemo || !state.token) return;
+
+        var authHeaders = {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer ' + state.token
+        };
+
+        try {
+          var portfolioUrl = '/api/portfolio/consolidated' + (opts.refreshPortfolio ? '?refresh=true' : '');
+          var responses = await Promise.all([
+            fetch('/api/categories', { method: 'GET', headers: authHeaders }),
+            fetch('/api/transactions?limit=50&offset=0', { method: 'GET', headers: authHeaders }),
+            fetch(portfolioUrl, { method: 'GET', headers: authHeaders })
+          ]);
+
+          var catRes = responses[0];
+          var txRes = responses[1];
+          var portRes = responses[2];
+
+          if (catRes.status === 401 || txRes.status === 401) {
+            handleLogout();
+            return;
+          }
+
+          var catBody = await catRes.json().catch(function () { return {}; });
+          var txBody = await txRes.json().catch(function () { return {}; });
+          var portBody = await portRes.json().catch(function () { return {}; });
+
+          var loadedCategories = Array.isArray(catBody.data) ? catBody.data : [];
+
+          // Semeadura automática de categorias iniciais caso o usuário recém-cadastrado não tenha nenhuma
+          if (loadedCategories.length === 0) {
+            var starterCategories = [
+              { name: 'Salário / Pró-Labore', type: 'INCOME' },
+              { name: 'Moradia & Condomínio', type: 'EXPENSE' },
+              { name: 'Alimentação & Mercado', type: 'EXPENSE' },
+              { name: 'Transporte & Mobilidade', type: 'EXPENSE' },
+              { name: 'Lazer & Assinaturas', type: 'EXPENSE' }
+            ];
+            for (var s = 0; s < starterCategories.length; s++) {
+              try {
+                var seedRes = await fetch('/api/categories', {
+                  method: 'POST',
+                  headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
+                  body: JSON.stringify(starterCategories[s])
+                });
+                var seedBody = await seedRes.json();
+                if (seedRes.ok && seedBody.data) {
+                  loadedCategories.push(seedBody.data);
+                }
+              } catch (seedErr) {}
+            }
+          }
+
+          state.categories = loadedCategories;
+
+          var rawTransactions = Array.isArray(txBody.data) ? txBody.data : [];
+          state.transactions = rawTransactions.map(function (tx) {
+            var matchedCat = tx.category || tx.categories || state.categories.find(function (c) { return c.id === tx.category_id; }) || { name: 'Geral', type: 'EXPENSE' };
+            return Object.assign({}, tx, {
+              amount: Number(tx.amount) || 0,
+              category: matchedCat,
+              categories: matchedCat
+            });
+          });
+
+          if (portRes.ok && portBody.data) {
+            state.portfolio = portBody.data;
+          } else {
+            state.portfolio = { total_portfolio_value: 0, positions: [], allocation_by_type: {} };
+          }
+
+          recalculateAndRender({ rebuildLists: true });
+          if (!opts.silent) {
+            showToast('Dados e cotações sincronizados com sucesso!');
+          }
+        } catch (err) {
+          if (!opts.silent) {
+            showToast('Falha ao sincronizar com a API Supabase.', 'error');
+          }
+        }
+      }
+
+      // Handler Unificado para exclusão de transações (Suporte Demo & API Real E06.T03)
+      document.addEventListener('click', async function (e) {
         if (e.target && e.target.classList.contains('delete-btn')) {
           var txId = e.target.getAttribute('data-tx-id') || e.target.getAttribute('data-transaction-id');
           if (txId) {
+            if (!state.isDemo && state.token) {
+              e.target.disabled = true;
+              try {
+                var delRes = await fetch('/api/transactions/' + encodeURIComponent(txId), {
+                  method: 'DELETE',
+                  headers: {
+                    'Accept': 'application/json',
+                    'Authorization': 'Bearer ' + state.token
+                  }
+                });
+                if (!delRes.ok) {
+                  e.target.disabled = false;
+                  showToast('Não foi possível excluir a transação na API.', 'error');
+                  return;
+                }
+              } catch (err) {
+                e.target.disabled = false;
+                showToast('Erro de conexão ao excluir transação.', 'error');
+                return;
+              }
+            }
+
             state.transactions = state.transactions.filter(function (t) { return t.id !== txId; });
             removeTransactionViews(txId);
             recalculateAndRender();
@@ -810,6 +1097,11 @@ ${tokensCss}
           }
         }
       });
+
+      // Carrega automaticamente os dados reais do Supabase se a sessão for autenticada
+      if (!state.isDemo && state.token) {
+        syncFromSupabaseApi({ refreshPortfolio: false, silent: true });
+      }
     })();
   </script>
 </body>
