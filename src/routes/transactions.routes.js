@@ -9,6 +9,12 @@ router.use(requireAuth);
 // GET /transactions - Listar transações do usuário autenticado (com filtros de data, categoria e paginação)
 router.get('/', transactionsController.listTransactions);
 
+// POST /transactions/parse-pdf - Extrair e pré-classificar transações de extrato/fatura PDF (E07.T01)
+router.post('/parse-pdf', transactionsController.parsePdfTransactions);
+
+// POST /transactions/batch - Confirmar e importar lote de transações extraídas (E07.T01)
+router.post('/batch', transactionsController.createBatchTransactions);
+
 // GET /transactions/:id - Obter transação por ID do usuário autenticado
 router.get('/:id', transactionsController.getTransactionById);
 

@@ -1,5 +1,12 @@
 const { getSupabaseClient } = require('../lib/supabase');
-const { createTransactionSchema, updateTransactionSchema, sanitizeTransaction } = require('../schemas/transactions.schema');
+const {
+  createTransactionSchema,
+  updateTransactionSchema,
+  parsePdfStatementSchema,
+  batchCreateTransactionsSchema,
+  sanitizeTransaction
+} = require('../schemas/transactions.schema');
+const { parsePdfStatement } = require('../services/pdfParser.service');
 
 function formatZodIssues(issues) {
   return issues.map(i => {
@@ -123,6 +130,112 @@ async function createTransaction(req, res) {
   }
 }
 
+/**
+ * POST /transactions/parse-pdf (E07.T01)
+ * Extrai e classifica transações de um Extrato Bancário ou Fatura de Cartão em PDF,
+ * vinculando automaticamente às categorias do usuário autenticado (req.user.id).
+ */
+async function parsePdfTransactions(req, res) {
+  try {
+    const validation = parsePdfStatementSchema.safeParse(req.body || {});
+
+    if (!validation.success) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Dados inválidos para extração de PDF',
+        errors: formatZodIssues(validation.error.issues)
+      });
+    }
+
+    const { pdf_base64, raw_text } = validation.data;
+    if ((!pdf_base64 || !String(pdf_base64).trim()) && (!raw_text || !String(raw_text).trim())) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'É necessário fornecer pdf_base64 ou raw_text para extração de transações'
+      });
+    }
+
+    let userCategories = [];
+    try {
+      const supabase = getSupabaseClient(req);
+      const { data: cats } = await supabase
+        .from('categories')
+        .select('id, name, type')
+        .eq('user_id', req.user.id);
+      if (Array.isArray(cats)) {
+        userCategories = cats;
+      }
+    } catch (_) {
+      userCategories = [];
+    }
+
+    const parsedData = parsePdfStatement(validation.data, { userCategories });
+
+    return res.status(200).json({
+      status: 'ok',
+      data: parsedData
+    });
+  } catch (err) {
+    const statusCode = err.status || 400;
+    return res.status(statusCode).json({
+      status: 'error',
+      message: err.message || 'Falha ao processar o arquivo PDF'
+    });
+  }
+}
+
+/**
+ * POST /transactions/batch (E07.T01)
+ * Persiste em lote uma lista de transações extraídas/conciliadas para o usuário autenticado (req.user.id).
+ */
+async function createBatchTransactions(req, res) {
+  try {
+    const validation = batchCreateTransactionsSchema.safeParse(req.body || {});
+
+    if (!validation.success) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Dados inválidos para importação em lote de transações',
+        errors: formatZodIssues(validation.error.issues)
+      });
+    }
+
+    const supabase = getSupabaseClient(req);
+    const rowsToInsert = validation.data.transactions.map(tx => ({
+      ...tx,
+      is_automated: tx.is_automated !== undefined ? tx.is_automated : true,
+      user_id: req.user.id
+    }));
+
+    const insertQuery = supabase
+      .from('transactions')
+      .insert(rowsToInsert)
+      .select('*, category:categories(id, name, type, color, icon)');
+
+    const result = typeof insertQuery.single === 'function' && rowsToInsert.length === 1
+      ? await insertQuery.single()
+      : await insertQuery;
+
+    if (result.error) {
+      return res.status(500).json({ status: 'error', message: result.error.message });
+    }
+
+    const rawRows = Array.isArray(result.data)
+      ? result.data
+      : (result.data ? [result.data] : rowsToInsert);
+
+    const sanitized = rawRows.map(sanitizeTransaction);
+
+    return res.status(201).json({
+      status: 'ok',
+      count: sanitized.length,
+      data: sanitized
+    });
+  } catch (err) {
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+}
+
 async function updateTransaction(req, res) {
   try {
     const { id } = req.params;
@@ -200,6 +313,8 @@ module.exports = {
   listTransactions,
   getTransactionById,
   createTransaction,
+  parsePdfTransactions,
+  createBatchTransactions,
   updateTransaction,
   deleteTransaction
 };
