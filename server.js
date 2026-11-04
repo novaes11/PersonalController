@@ -56,10 +56,18 @@ app.use(express.json());
 // Roteador principal
 const router = express.Router();
 
-// Rota Visual da Aplicação SPA Mobile-First (E05.T04)
-router.get(['/dashboard', '/app'], (req, res) => {
+// Rota Visual da Aplicação SPA Mobile-First (E05.T04 & E05.T06)
+router.get(['/dashboard', '/app', '/portfolio'], (req, res, next) => {
+  if (
+    req.path === '/portfolio' &&
+    ((req.baseUrl && req.baseUrl.startsWith('/api')) ||
+      (req.originalUrl && req.originalUrl.startsWith('/api')))
+  ) {
+    return next();
+  }
+  const activeTab = req.path === '/portfolio' ? 'portfolio' : 'overview';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.status(200).send(renderAppPage());
+  res.status(200).send(renderAppPage({ activeTab }));
 });
 
 // Rotas Visuais de Acesso (/login, /signup, /auth-view)

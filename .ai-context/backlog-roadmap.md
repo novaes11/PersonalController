@@ -14,17 +14,24 @@
   - `SEC-05`: Implementação de Rate Limiting.
   - `E04.T03`: Cards de KPIs (Liquidez e Burn Rate).
   - `E04.T04`: Gráfico Donut de Distribuição de Ativos.
+- **Épico 05 — Design System & Interface Visual Mobile-First**: Concluído ✅
+  - `E05.T01`: Fundações do Design System e Tokens CSS Mobile-First (3 camadas). ✅ Concluído
+  - `E05.T02`: App Shell Responsivo: Bottom Nav (Mobile) e Sidebar (Desktop). ✅ Concluído
+  - `E05.T03`: Tela de Autenticação (/login, /signup) e Modo Demo Interativo. ✅ Concluído
+  - `E05.T04`: Integração da View Principal do Dashboard e Rota Visual (`/dashboard`). ✅ Concluído
+  - `E05.T05`: Experiência Mobile de Transações (Bottom Sheet / Modal + Lista Responsiva). ✅ Concluído
+  - `E05.T06`: View Dedicada de Carteira de Investimentos & Sincronização de Cotações. ✅ Concluído
+- **Épico 06 — Paridade de Tema, Interatividade Global & Sincronização Real Supabase**: Concluído ✅
+  - `E06.T01`: Auditoria e Paridade Global de Tema (Dark & Light Mode). ✅ Concluído
+  - `E06.T02`: Ativação Funcional de Todos os Botões, Header, Sidebar e Abas Dinâmicas. ✅ Concluído
+  - `E06.T03`: Transição de Dados Mockados (Demo) para Dados Reais da API Supabase. ✅ Concluído
 
 ---
 
-## 2. Épico Atual: Épico 05 — Design System & Interface Visual Mobile-First
+## 2. Próximo Épico: Épico 07 — Importação e Conciliação de Extratos e Faturas PDF
 
-- `E05.T01`: Fundações do Design System e Tokens CSS Mobile-First (3 camadas). ✅ Concluído
-- `E05.T02`: App Shell Responsivo: Bottom Nav (Mobile) e Sidebar (Desktop). ✅ Concluído
-- `E05.T03`: Tela de Autenticação (/login, /signup) e Modo Demo Interativo. ✅ Concluído
-- `E05.T04`: Integração da View Principal do Dashboard e Rota Visual (`/dashboard`). ✅ Concluído
-- `E05.T05`: Experiência Mobile de Transações (Bottom Sheet / Modal + Lista Responsiva). ⏳ Próxima tarefa
-- `E05.T06`: View Dedicada de Carteira de Investimentos & Sincronização de Cotações. ⏳ Planejada
+- `E07.T01`: Parser e Extrator de Transações em Extratos e Faturas PDF (Backend Service). ⏳ Próxima tarefa
+- `E07.T02`: Interface Mobile-First de Upload, Conciliação e Confirmação em Lote de PDF. ⏳ Planejada
 
 ---
 
