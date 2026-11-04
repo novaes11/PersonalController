@@ -25,6 +25,9 @@ supabase/.temp/
 # External / embedded local test repositories
 ai-agents-core/
 
+# Local Agent Rules
+AGENTS.md
+
 # Test coverage
 coverage/
 
