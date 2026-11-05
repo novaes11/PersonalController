@@ -1,5 +1,5 @@
 /**
- * Serviço de Transição e Sincronização de Dados Reais da API Supabase vs Modo Demonstração (E06.T03).
+ * Serviço de Transição e Sincronização de Dados Reais da API Supabase vs Modo Demonstração (E06.T03 & E05.T06).
  *
  * Responsabilidades:
  * 1. Detectar de forma determinística se a sessão ativa está em Modo Demonstração (`isDemo: true`)
@@ -18,7 +18,7 @@ const {
   fetchTransactions,
   deleteTransactionById
 } = require('./transactionsApi');
-const { fetchConsolidatedPortfolio } = require('./portfolioApi');
+const { fetchConsolidatedPortfolio, syncPortfolioQuotes } = require('./portfolioApi');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -251,6 +251,44 @@ async function loadDashboardState(options = {}) {
 }
 
 /**
+ * Sincroniza as cotações de mercado do portfólio consolidado (?refresh=true) (E05.T06):
+ * - Em Modo Demo: retorna o portfólio demo normalizado com timestamp atualizado.
+ * - Em Modo Autenticado: invoca GET /api/portfolio/consolidated?refresh=true com Bearer JWT.
+ */
+async function syncPortfolioQuotesState(options = {}) {
+  const {
+    session = null,
+    baseUrl = '/api',
+    fetchImpl = global.fetch
+  } = options;
+
+  const resolved = resolveAuthSessionMode(session);
+
+  if (resolved.mode === 'demo') {
+    const demoData = createDemoDataset();
+    return {
+      mode: 'demo',
+      portfolio: normalizePortfolioRecord({
+        ...demoData.portfolio,
+        quotes_refreshed: true,
+        consolidated_at: new Date().toISOString()
+      })
+    };
+  }
+
+  const refreshed = await syncPortfolioQuotes({
+    token: resolved.token,
+    baseUrl,
+    fetchImpl
+  });
+
+  return {
+    mode: 'authenticated',
+    portfolio: normalizePortfolioRecord(refreshed)
+  };
+}
+
+/**
  * Persiste uma nova transação:
  * - Em Modo Demo: adiciona apenas em memória.
  * - Em Modo Autenticado: envia POST /api/transactions com Bearer token e payload Zod estrito.
@@ -358,13 +396,14 @@ async function removeTransaction(options = {}) {
 }
 
 module.exports = {
-   DEFAULT_STARTER_CATEGORIES,
+  DEFAULT_STARTER_CATEGORIES,
   resolveAuthSessionMode,
   normalizeTransactionRecord,
   normalizePortfolioRecord,
   createUserCategory,
   ensureUserCategories,
   loadDashboardState,
+  syncPortfolioQuotesState,
   persistTransaction,
   removeTransaction
 };

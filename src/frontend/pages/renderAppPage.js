@@ -9,7 +9,7 @@ const { createDemoDataset } = require('../services/authApi');
 
 /**
  * Gera o documento HTML5 completo da Single-Page Application (SPA) Mobile-First,
- * com suporte completo a abas dinâmicas, header, sidebar e interatividade (E06.T02).
+ * com suporte completo a abas dinâmicas, header, sidebar e interatividade (E06.T02 & E05.T06).
  */
 function renderAppPage(options = {}) {
   const {
@@ -214,10 +214,10 @@ ${tokensCss}
 
   <div id="pc-toast-container" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Runtime Interativo SPA do Cliente (E06.T02) -->
+  <!-- Runtime Interativo SPA do Cliente (E06.T02, E06.T03 & E05.T06) -->
   <script>
     (function () {
-      // Estado reativo em memória (E06.T02 & E06.T03)
+      // Estado reativo em memória (E06.T02, E06.T03 & E05.T06)
       var state = {
         theme: '${normalizedTheme}',
         activeTab: '${activeTab}',
@@ -228,11 +228,22 @@ ${tokensCss}
         isRefreshing: false,
         cashflowFilter: 'ALL',
         cashflowSearch: '',
+        portfolioFilter: 'ALL',
         transactions: ${JSON.stringify(demoData.transactions)},
         categories: ${JSON.stringify(demoData.categories)},
         portfolio: ${JSON.stringify(demoData.portfolio)},
         monthlyBudget: 5000,
         upcomingExpenses15d: 0
+      };
+
+      var ASSET_TYPE_LABELS = {
+        STOCK: 'Ações B3',
+        CRYPTO: 'Criptoativos',
+        FIXED_INCOME: 'Renda Fixa',
+        FII: 'FIIs',
+        CURRENCY: 'Câmbio',
+        ETF: 'ETFs',
+        OTHER: 'Outros'
       };
 
       // Exibição de Toasts Flutuantes Acessíveis
@@ -437,7 +448,7 @@ ${tokensCss}
         }
       } catch (e) {}
 
-      // Ação de Atualização Funcional (Header, Sidebar e Portfolio Sync) — Suporte Demo & API Real (E06.T03)
+      // Ação de Atualização Funcional (Header, Sidebar e Portfolio Sync ?refresh=true) — Suporte Demo & API Real (E06.T03 & E05.T06)
       function triggerRefreshAction() {
         if (state.isRefreshing) return;
         state.isRefreshing = true;
@@ -445,6 +456,12 @@ ${tokensCss}
         var refreshBtns = document.querySelectorAll(
           '[data-testid="quick-refresh-btn"], [data-testid="sidebar-refresh-btn"], [data-testid="portfolio-sync-quotes-btn"]'
         );
+        var quotesBadge = document.querySelector('[data-testid="portfolio-quotes-badge"]');
+        var syncBtnLabel = document.querySelector('[data-testid="portfolio-sync-btn-label"]');
+        var lastSyncEl = document.querySelector('[data-testid="portfolio-last-sync"]');
+
+        if (quotesBadge) quotesBadge.textContent = 'Sincronizando';
+        if (syncBtnLabel) syncBtnLabel.textContent = 'Sincronizando...';
 
         refreshBtns.forEach(function (btn) {
           btn.setAttribute('aria-busy', 'true');
@@ -458,6 +475,12 @@ ${tokensCss}
             var svg = btn.querySelector('svg');
             if (svg) svg.classList.remove('animate-spin');
           });
+          if (quotesBadge) quotesBadge.textContent = 'Online';
+          if (syncBtnLabel) syncBtnLabel.textContent = 'Sincronizar Cotações';
+          if (lastSyncEl) {
+            var nowStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            lastSyncEl.textContent = 'Atualizado às ' + nowStr + ' (?refresh=true)';
+          }
           state.isRefreshing = false;
         }
 
@@ -467,7 +490,7 @@ ${tokensCss}
         }
 
         setTimeout(function () {
-          recalculateAndRender();
+          recalculateAndRender({ rebuildLists: true });
           finishSpin();
           showToast('Dados e cotações sincronizados com sucesso!');
         }, 500);
@@ -475,6 +498,57 @@ ${tokensCss}
 
       document.querySelectorAll('[data-testid="quick-refresh-btn"], [data-testid="sidebar-refresh-btn"], [data-testid="portfolio-sync-quotes-btn"]')
         .forEach(function (btn) { btn.addEventListener('click', triggerRefreshAction); });
+
+      // Filtro Mobile-First por Classe de Ativo na Aba Carteira (E05.T06)
+      function applyPortfolioFilters() {
+        var filterType = state.portfolioFilter || 'ALL';
+        var visibleDesktop = 0;
+        var visibleMobile = 0;
+
+        document.querySelectorAll('[data-testid="portfolio-positions-table"] tbody tr[data-asset-type]').forEach(function (tr) {
+          var rowType = tr.getAttribute('data-asset-type');
+          if (filterType === 'ALL' || rowType === filterType) {
+            tr.style.display = '';
+            visibleDesktop++;
+          } else {
+            tr.style.display = 'none';
+          }
+        });
+
+        document.querySelectorAll('[data-testid="portfolio-positions-mobile-list"] li[data-asset-type]').forEach(function (li) {
+          var cardType = li.getAttribute('data-asset-type');
+          if (filterType === 'ALL' || cardType === filterType) {
+            li.style.display = '';
+            visibleMobile++;
+          } else {
+            li.style.display = 'none';
+          }
+        });
+
+        var countEl = document.querySelector('[data-testid="portfolio-positions-count"]');
+        if (countEl) {
+          var count = visibleDesktop || visibleMobile || 0;
+          countEl.textContent = count + ' ativos em carteira';
+        }
+      }
+
+      document.querySelectorAll('.portfolio-filter-pill').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          state.portfolioFilter = btn.getAttribute('data-portfolio-filter') || 'ALL';
+          document.querySelectorAll('.portfolio-filter-pill').forEach(function (pill) {
+            var isCurrent = pill.getAttribute('data-portfolio-filter') === state.portfolioFilter;
+            pill.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+            if (isCurrent) {
+              pill.classList.add('bg-indigo-600', 'text-white', 'shadow-sm');
+              pill.classList.remove('bg-slate-800', 'text-slate-300');
+            } else {
+              pill.classList.remove('bg-indigo-600', 'text-white', 'shadow-sm');
+              pill.classList.add('bg-slate-800', 'text-slate-300');
+            }
+          });
+          applyPortfolioFilters();
+        });
+      });
 
       function setQuickActionExpanded(isExpanded) {
         document.querySelectorAll('[data-testid="quick-new-transaction-btn"], [data-testid="sidebar-new-transaction-btn"], [data-testid="cashflow-add-btn"]')
@@ -833,7 +907,7 @@ ${tokensCss}
         .forEach(function (btn) { btn.addEventListener('click', toggleNewTransactionForm); });
       setQuickActionExpanded(false);
 
-      // Renderização completa de Tabelas, Portfólio e Categorias a partir de state (E06.T03)
+      // Renderização completa de Tabelas, Portfólio e Categorias a partir de state (E06.T03 & E05.T06)
       function rebuildAllListsInDom() {
         var overviewTbody = document.querySelector('[data-testid="transactions-table-body"]');
         var overviewMobileList = document.querySelector('[data-testid="transactions-mobile-list"]');
@@ -884,35 +958,135 @@ ${tokensCss}
         }
         applyCashflowFilters();
 
-        // Atualiza Portfólio Consolidado
-        var portfolioTotal = Number(state.portfolio && state.portfolio.total_portfolio_value) || 0;
+        // Atualiza Portfólio Consolidado (E05.T06)
+        var rawPort = state.portfolio || {};
+        var positions = Array.isArray(rawPort.positions) ? rawPort.positions : [];
+        var portfolioTotal = Number(rawPort.total_portfolio_value) || 0;
+        var portfolioInvested = Number(rawPort.total_invested_value !== undefined ? rawPort.total_invested_value : rawPort.total_invested) || 0;
+        if (portfolioInvested === 0 && positions.length > 0) {
+          portfolioInvested = positions.reduce(function (acc, p) {
+            var q = Number(p.quantity) || 1;
+            var avg = Number(p.average_price) || Number(p.current_price) || 0;
+            return acc + (Number(p.invested_value) || (q * avg));
+          }, 0);
+        }
+        var totalProfitLoss = rawPort.total_profit_loss !== undefined
+          ? Number(rawPort.total_profit_loss)
+          : (portfolioTotal - portfolioInvested);
+        var totalReturnPct = rawPort.total_profit_loss_percentage !== undefined
+          ? Number(rawPort.total_profit_loss_percentage)
+          : (rawPort.total_profit_loss_pct !== undefined
+            ? Number(rawPort.total_profit_loss_pct)
+            : (portfolioInvested > 0 ? ((portfolioTotal - portfolioInvested) / portfolioInvested) * 100 : 0));
+
         var portfolioTotalFmt = 'R$ ' + formatCurrencyBRL(portfolioTotal);
         document.querySelectorAll('[data-testid="portfolio-total-value"], [data-portfolio-total="true"]')
           .forEach(function (el) { el.textContent = portfolioTotalFmt; });
 
+        var investedEl = document.querySelector('[data-testid="portfolio-invested-value"]');
+        if (investedEl) investedEl.textContent = 'R$ ' + formatCurrencyBRL(portfolioInvested);
+
+        var isPositiveTotal = totalProfitLoss >= 0 && totalReturnPct >= 0;
+        var sign = isPositiveTotal ? '+' : '-';
+        var returnPctEl = document.querySelector('[data-testid="portfolio-return-percentage"]');
+        if (returnPctEl) {
+          returnPctEl.textContent = sign + ' ' + Math.abs(totalReturnPct).toFixed(2) + '%';
+          returnPctEl.className = 'text-xl md:text-2xl font-bold block mt-1 tabular-nums ' + (isPositiveTotal ? 'text-emerald-400' : 'text-rose-400');
+        }
+        var profitLossEl = document.querySelector('[data-testid="portfolio-profit-loss-value"]');
+        if (profitLossEl) {
+          profitLossEl.textContent = sign + ' R$ ' + formatCurrencyBRL(Math.abs(totalProfitLoss)) + ' acumulado';
+          profitLossEl.className = 'text-xs mt-1 block tabular-nums ' + (isPositiveTotal ? 'text-emerald-400' : 'text-rose-400');
+        }
+
         var portfolioTableBody = document.querySelector('[data-testid="portfolio-positions-table"] tbody');
-        if (portfolioTableBody && state.portfolio && Array.isArray(state.portfolio.positions)) {
-          var positions = state.portfolio.positions;
+        if (portfolioTableBody) {
           if (positions.length === 0) {
-            portfolioTableBody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-sm text-slate-400">Nenhum ativo cadastrado.</td></tr>';
+            portfolioTableBody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-sm text-slate-400">Nenhum ativo cadastrado.</td></tr>';
           } else {
             portfolioTableBody.innerHTML = positions.map(function (pos) {
               var ticker = escapeHtml(pos.ticker);
+              var assetType = pos.asset_type || 'OTHER';
+              var typeLabel = ASSET_TYPE_LABELS[assetType] || assetType || 'Outros';
               var qty = Number(pos.quantity) || 1;
               var curPrice = Number(pos.current_price) || 0;
+              var avgPrice = Number(pos.average_price) || curPrice;
               var posTotal = Number(pos.current_value) || (qty * curPrice);
+              var posInvested = Number(pos.invested_value) || (qty * avgPrice);
+              var posProfit = pos.profit_loss !== undefined ? Number(pos.profit_loss) : (posTotal - posInvested);
+              var posPct = pos.profit_loss_percentage !== undefined
+                ? Number(pos.profit_loss_percentage)
+                : (pos.profit_loss_pct !== undefined
+                  ? Number(pos.profit_loss_pct)
+                  : (posInvested > 0 ? ((posTotal - posInvested) / posInvested) * 100 : 0));
+              var isPosUp = posProfit >= 0 && posPct >= 0;
+              var posSign = isPosUp ? '+' : '-';
+              var posBadgeClass = isPosUp
+                ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800/60'
+                : 'text-rose-400 bg-rose-950/60 border-rose-800/60';
               var weightPct = portfolioTotal > 0 ? ((posTotal / portfolioTotal) * 100).toFixed(1) : '0.0';
-              return '<tr data-testid="portfolio-pos-row-' + ticker + '" class="border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors">' +
+
+              return '<tr data-testid="portfolio-pos-row-' + ticker + '" data-asset-type="' + escapeHtml(assetType) + '" class="border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors">' +
                 '<td class="py-3.5 px-4 text-sm font-semibold text-slate-100">' + ticker + '</td>' +
-                '<td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + escapeHtml(pos.asset_type || 'Outros') + '</span></td>' +
+                '<td class="py-3.5 px-4 text-sm text-slate-300"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-200 border border-slate-700">' + escapeHtml(typeLabel) + '</span></td>' +
                 '<td class="py-3.5 px-4 text-sm text-slate-300 tabular-nums">' + qty + '</td>' +
-                '<td class="py-3.5 px-4 text-sm text-slate-300 tabular-nums">R$ ' + formatCurrencyBRL(curPrice) + '</td>' +
+                '<td class="py-3.5 px-4 text-sm text-slate-300 tabular-nums"><span class="block text-slate-100">R$ ' + formatCurrencyBRL(curPrice) + '</span><span class="block text-[11px] text-slate-400">PM: R$ ' + formatCurrencyBRL(avgPrice) + '</span></td>' +
+                '<td class="py-3.5 px-4 text-sm text-right tabular-nums" data-testid="portfolio-pos-return-' + ticker + '"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ' + posBadgeClass + '">' + posSign + ' ' + Math.abs(posPct).toFixed(2) + '%</span></td>' +
                 '<td class="py-3.5 px-4 text-sm font-semibold text-right text-slate-100 tabular-nums">R$ ' + formatCurrencyBRL(posTotal) + '</td>' +
                 '<td class="py-3.5 px-4 text-sm text-right text-indigo-400 font-semibold tabular-nums">' + weightPct + '%</td>' +
                 '</tr>';
             }).join('');
           }
         }
+
+        var portfolioMobileList = document.querySelector('[data-testid="portfolio-positions-mobile-list"]');
+        if (portfolioMobileList) {
+          if (positions.length === 0) {
+            portfolioMobileList.innerHTML = '<li class="py-8 text-center text-sm text-slate-400">Nenhum ativo cadastrado.</li>';
+          } else {
+            portfolioMobileList.innerHTML = positions.map(function (pos) {
+              var ticker = escapeHtml(pos.ticker);
+              var assetType = pos.asset_type || 'OTHER';
+              var typeLabel = ASSET_TYPE_LABELS[assetType] || assetType || 'Outros';
+              var qty = Number(pos.quantity) || 1;
+              var curPrice = Number(pos.current_price) || 0;
+              var avgPrice = Number(pos.average_price) || curPrice;
+              var posTotal = Number(pos.current_value) || (qty * curPrice);
+              var posInvested = Number(pos.invested_value) || (qty * avgPrice);
+              var posProfit = pos.profit_loss !== undefined ? Number(pos.profit_loss) : (posTotal - posInvested);
+              var posPct = pos.profit_loss_percentage !== undefined
+                ? Number(pos.profit_loss_percentage)
+                : (pos.profit_loss_pct !== undefined
+                  ? Number(pos.profit_loss_pct)
+                  : (posInvested > 0 ? ((posTotal - posInvested) / posInvested) * 100 : 0));
+              var isPosUp = posProfit >= 0 && posPct >= 0;
+              var posSign = isPosUp ? '+' : '-';
+              var posColor = isPosUp ? 'text-emerald-400' : 'text-rose-400';
+              var weightPct = portfolioTotal > 0 ? ((posTotal / portfolioTotal) * 100).toFixed(1) : '0.0';
+
+              return '<li data-testid="portfolio-pos-card-' + ticker + '" data-asset-type="' + escapeHtml(assetType) + '" class="rounded-xl border border-slate-800 bg-slate-950/50 p-4 space-y-2.5">' +
+                '<div class="flex items-center justify-between">' +
+                  '<span class="text-sm font-bold text-slate-100">' + ticker + '</span>' +
+                  '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">' + escapeHtml(typeLabel) + '</span>' +
+                '</div>' +
+                '<div class="flex items-center justify-between text-xs text-slate-400">' +
+                  '<span>Qtd: ' + qty + ' &times; R$ ' + formatCurrencyBRL(curPrice) + '</span>' +
+                  '<span class="text-indigo-400 font-semibold">' + weightPct + '% da carteira</span>' +
+                '</div>' +
+                '<div class="flex items-center justify-between text-xs text-slate-400">' +
+                  '<span>Preço Médio: R$ ' + formatCurrencyBRL(avgPrice) + '</span>' +
+                  '<span class="font-semibold tabular-nums ' + posColor + '">' + posSign + ' R$ ' + formatCurrencyBRL(Math.abs(posProfit)) + ' (' + posSign + Math.abs(posPct).toFixed(2) + '%)</span>' +
+                '</div>' +
+                '<div class="pt-1.5 flex items-center justify-between border-t border-slate-800/80">' +
+                  '<span class="text-xs text-slate-400">Total em Posição:</span>' +
+                  '<span class="text-sm font-semibold text-slate-100 tabular-nums">R$ ' + formatCurrencyBRL(posTotal) + '</span>' +
+                '</div>' +
+              '</li>';
+            }).join('');
+          }
+        }
+
+        applyPortfolioFilters();
 
         // Atualiza Categorias na aba Configurações
         var settingsCatList = document.querySelector('[data-testid="settings-categories-card"] ul');
@@ -977,7 +1151,7 @@ ${tokensCss}
         }
       }
 
-      // Sincronização de Dados Reais da API Supabase quando autenticado (E06.T03)
+      // Sincronização de Dados Reais da API Supabase quando autenticado (E06.T03 & E05.T06)
       async function syncFromSupabaseApi(options) {
         var opts = options || {};
         if (state.isDemo || !state.token) return;
