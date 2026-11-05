@@ -1,5 +1,5 @@
 /**
- * Cliente HTTP de Frontend para o domínio de Portfólio Consolidado (E04.T04).
+ * Cliente HTTP de Frontend para o domínio de Portfólio Consolidado (E04.T04 & E05.T06).
  * Consome GET /api/portfolio/consolidated com autenticação Bearer JWT.
  */
 
@@ -43,6 +43,22 @@ async function fetchConsolidatedPortfolio(options = {}) {
   return body.data;
 }
 
+/**
+ * Dispara a sincronização forçada de cotações de mercado (?refresh=true)
+ * no endpoint GET /api/portfolio/consolidated (E05.T06).
+ * @param {object} [options]
+ * @param {string} [options.token] JWT do usuário autenticado
+ * @param {string} [options.baseUrl='/api']
+ * @param {Function} [options.fetchImpl=global.fetch]
+ */
+async function syncPortfolioQuotes(options = {}) {
+  return fetchConsolidatedPortfolio({
+    ...options,
+    refresh: true
+  });
+}
+
 module.exports = {
-  fetchConsolidatedPortfolio
+  fetchConsolidatedPortfolio,
+  syncPortfolioQuotes
 };
