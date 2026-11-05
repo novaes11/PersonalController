@@ -30,6 +30,33 @@ const updateTransactionSchema = z.object({
   message: 'Campos adicionais não permitidos na atualização de transação (Mass Assignment bloqueado)'
 });
 
+// Schema estrito para extração de transações de Extrato/Fatura em PDF (E07.T01 & SEC-04)
+const parsePdfStatementSchema = z.object({
+  pdf_base64: z.string().max(7_000_000, 'Payload Base64 excede o tamanho máximo permitido').optional().nullable(),
+  raw_text: z.string().max(1_000_000, 'Texto bruto excede o tamanho máximo permitido').optional().nullable(),
+  file_name: z.string().max(120, 'O nome do arquivo deve ter no máximo 120 caracteres').optional().default('extrato.pdf'),
+  document_type: z.enum(['AUTO', 'BANK_STATEMENT', 'CREDIT_CARD_INVOICE']).optional().default('AUTO'),
+  reference_year: z.coerce.number().int().min(2000).max(2100).optional()
+}).strict({
+  message: 'Campos adicionais não permitidos no parser de PDF (Mass Assignment bloqueado)'
+});
+
+// Schema estrito de item individual em importação em lote de PDF (is_automated = true por padrão)
+const batchTransactionItemSchema = createTransactionSchema.extend({
+  is_automated: z.boolean().optional().default(true)
+}).strict({
+  message: 'Campos adicionais não permitidos no item de transação em lote (Mass Assignment bloqueado)'
+});
+
+// Schema estrito para confirmação e criação em lote de transações extraídas de PDF (E07.T01 & SEC-04)
+const batchCreateTransactionsSchema = z.object({
+  transactions: z.array(batchTransactionItemSchema)
+    .min(1, 'A lista de transações para importação em lote não pode estar vazia')
+    .max(200, 'O limite máximo por lote de importação é de 200 transações')
+}).strict({
+  message: 'Campos adicionais não permitidos na importação em lote (Mass Assignment bloqueado)'
+});
+
 // Sanitizador de resposta de transação para evitar vazamento de metadados internos
 function sanitizeTransaction(tx) {
   if (!tx) return null;
@@ -55,5 +82,7 @@ function sanitizeTransaction(tx) {
 module.exports = {
   createTransactionSchema,
   updateTransactionSchema,
+  parsePdfStatementSchema,
+  batchCreateTransactionsSchema,
   sanitizeTransaction
 };

@@ -50,8 +50,8 @@ app.use(cors({
   credentials: true
 }));
 
-// Parsing de JSON no corpo das requisições
-app.use(express.json());
+// Parsing de JSON no corpo das requisições (limite de 8MB para suportar upload de PDF em Base64 de até 5MB - E07.T01)
+app.use(express.json({ limit: '8mb' }));
 
 // Roteador principal
 const router = express.Router();
