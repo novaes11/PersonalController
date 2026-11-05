@@ -33,6 +33,10 @@ function renderLandingPage(options = {}) {
     successMessage
   });
 
+  const pageTitle = mode === 'signup'
+    ? 'PersonalController — Criar Conta'
+    : 'PersonalController — Entrar na Conta';
+
   return `<!DOCTYPE html>
 <html lang="pt-BR" data-theme="${normalizedTheme}">
 <head>
@@ -40,7 +44,7 @@ function renderLandingPage(options = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="${themeColor}" />
   <meta name="description" content="PersonalController — Autenticação Segura e Acesso ao Dashboard Financeiro" />
-  <title>PersonalController — Entrar na Conta</title>
+  <title>${pageTitle}</title>
 
   <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -99,6 +103,9 @@ ${tokensCss}
     (function () {
       const STORAGE_KEY = 'pc_auth_session';
 
+      const EYE_ICON_SVG = '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+      const EYE_OFF_ICON_SVG = '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+
       function saveSessionStorage(sessionObj) {
         const serialized = JSON.stringify(sessionObj);
         try {
@@ -132,6 +139,12 @@ ${tokensCss}
       const demoBtn = document.querySelector('[data-testid="demo-mode-btn"]');
       const emailInput = document.querySelector('[data-testid="auth-email-input"]');
       const passwordInput = document.querySelector('[data-testid="auth-password-input"]'); // allowlist-secret
+      const confirmContainer = document.getElementById('confirm-password-container');
+      const confirmPasswordInput = document.querySelector('[data-testid="auth-confirm-password-input"]'); // allowlist-secret
+      const passwordRequirements = document.getElementById('password-requirements');
+      const passwordReqCounter = document.getElementById('password-req-counter');
+      const authFooterToggleBtn = document.getElementById('auth-footer-toggle-btn');
+      const authFooterText = document.getElementById('auth-footer-text');
 
       function showAlert(type, message) {
         clearAlerts();
@@ -167,6 +180,55 @@ ${tokensCss}
         return rawMessage;
       }
 
+      function checkPassword(pwd, confirm) {
+        return {
+          length: pwd.length >= 8,
+          uppercase: /[A-Z]/.test(pwd),
+          lowercase: /[a-z]/.test(pwd),
+          number: /[0-9]/.test(pwd),
+          special: /[^A-Za-z0-9]/.test(pwd),
+          match: Boolean(pwd.length > 0 && confirm.length > 0 && pwd === confirm)
+        };
+      }
+
+      function updatePasswordRequirements() {
+        const pwd = passwordInput ? passwordInput.value : '';
+        const confirm = confirmPasswordInput ? confirmPasswordInput.value : '';
+        const rules = checkPassword(pwd, confirm);
+
+        let metCount = 0;
+        for (const [key, isMet] of Object.entries(rules)) {
+          if (isMet) metCount++;
+          const itemEl = document.querySelector('[data-requirement="' + key + '"]');
+          if (itemEl) {
+            if (isMet) {
+              itemEl.className = 'flex items-center gap-2 text-emerald-300 font-medium transition-colors';
+              const indicator = itemEl.querySelector('.req-indicator');
+              if (indicator) {
+                indicator.className = 'req-indicator w-3.5 h-3.5 flex items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 text-xs shrink-0 font-bold';
+                indicator.textContent = '✓';
+              }
+            } else {
+              itemEl.className = 'flex items-center gap-2 text-slate-400 transition-colors';
+              const indicator = itemEl.querySelector('.req-indicator');
+              if (indicator) {
+                indicator.className = 'req-indicator w-3.5 h-3.5 flex items-center justify-center rounded-full bg-slate-800 text-[10px] text-slate-500 shrink-0';
+                indicator.textContent = '•';
+              }
+            }
+          }
+        }
+
+        if (passwordReqCounter) {
+          passwordReqCounter.textContent = metCount + '/6';
+          if (metCount === 6) {
+            passwordReqCounter.className = 'text-[10px] text-emerald-400 font-semibold';
+          } else {
+            passwordReqCounter.className = 'text-[10px] text-slate-400';
+          }
+        }
+      }
+
       function setMode(newMode) {
         currentMode = newMode;
         if (authView) authView.dataset.authMode = newMode;
@@ -176,15 +238,15 @@ ${tokensCss}
         if (loginTab) {
           loginTab.setAttribute('aria-selected', !isSignup ? 'true' : 'false');
           loginTab.className = !isSignup
-            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-colors bg-indigo-600 text-white shadow-sm'
-            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-colors text-slate-300 hover:text-white';
+            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all bg-indigo-600 text-white shadow-sm'
+            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
         }
 
         if (signupTab) {
           signupTab.setAttribute('aria-selected', isSignup ? 'true' : 'false');
           signupTab.className = isSignup
-            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-colors bg-indigo-600 text-white shadow-sm'
-            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-colors text-slate-300 hover:text-white';
+            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all bg-indigo-600 text-white shadow-sm'
+            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
         }
 
         if (submitBtn) {
@@ -195,6 +257,39 @@ ${tokensCss}
           passwordInput.autocomplete = isSignup ? 'new-password' : 'current-password';
         }
 
+        if (confirmContainer) {
+          if (isSignup) {
+            confirmContainer.classList.remove('hidden');
+            confirmContainer.classList.add('block');
+          } else {
+            confirmContainer.classList.remove('block');
+            confirmContainer.classList.add('hidden');
+          }
+        }
+
+        if (passwordRequirements) {
+          if (isSignup) {
+            passwordRequirements.classList.remove('hidden');
+            passwordRequirements.classList.add('block');
+            updatePasswordRequirements();
+          } else {
+            passwordRequirements.classList.remove('block');
+            passwordRequirements.classList.add('hidden');
+          }
+        }
+
+        if (authFooterText) {
+          authFooterText.textContent = isSignup ? 'Já possui uma conta?' : 'Não possui uma conta?';
+        }
+
+        if (authFooterToggleBtn) {
+          authFooterToggleBtn.textContent = isSignup ? 'Fazer login' : 'Criar conta';
+        }
+
+        document.title = isSignup
+          ? 'PersonalController — Criar Conta'
+          : 'PersonalController — Entrar na Conta';
+
         const newUrl = isSignup ? '/signup' : '/login';
         if (window.location.pathname !== newUrl && !window.location.pathname.startsWith('/api')) {
           history.pushState(null, '', newUrl);
@@ -203,6 +298,34 @@ ${tokensCss}
 
       if (loginTab) loginTab.addEventListener('click', () => setMode('login'));
       if (signupTab) signupTab.addEventListener('click', () => setMode('signup'));
+      if (authFooterToggleBtn) {
+        authFooterToggleBtn.addEventListener('click', () => {
+          setMode(currentMode === 'signup' ? 'login' : 'signup');
+        });
+      }
+
+      // Verificação em tempo real por digitação (evento input)
+      if (passwordInput) {
+        passwordInput.addEventListener('input', updatePasswordRequirements);
+        passwordInput.addEventListener('keyup', updatePasswordRequirements);
+      }
+      if (confirmPasswordInput) {
+        confirmPasswordInput.addEventListener('input', updatePasswordRequirements);
+        confirmPasswordInput.addEventListener('keyup', updatePasswordRequirements);
+      }
+
+      // Alternância de visibilidade de senha (ícone de olho)
+      document.querySelectorAll('[data-toggle-password]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const targetId = btn.getAttribute('data-toggle-password');
+          const targetInput = document.getElementById(targetId);
+          if (!targetInput) return;
+          const isPass = targetInput.type === 'password';
+          targetInput.type = isPass ? 'text' : 'password';
+          btn.innerHTML = isPass ? EYE_OFF_ICON_SVG : EYE_ICON_SVG;
+          btn.setAttribute('aria-label', isPass ? 'Ocultar senha' : 'Exibir senha');
+        });
+      });
 
       // Modo Demonstração (1 Clique)
       if (demoBtn) {
@@ -232,6 +355,7 @@ ${tokensCss}
 
           const email = emailInput ? emailInput.value.trim().toLowerCase() : '';
           const password = passwordInput ? passwordInput.value : ''; // allowlist-secret
+          const confirmPassword = confirmPasswordInput ? confirmPasswordInput.value : ''; // allowlist-secret
 
           if (!email || !email.includes('@')) {
             showAlert('error', 'Por favor, informe um endereço de e-mail válido.');
@@ -245,6 +369,27 @@ ${tokensCss}
             return;
           }
 
+          if (currentMode === 'signup') {
+            if (!confirmPassword) {
+              showAlert('error', 'Por favor, confirme sua senha.');
+              if (confirmPasswordInput) confirmPasswordInput.focus();
+              return;
+            }
+
+            if (password !== confirmPassword) {
+              showAlert('error', 'As senhas não coincidem.');
+              if (confirmPasswordInput) confirmPasswordInput.focus();
+              return;
+            }
+
+            const reqs = checkPassword(password, confirmPassword);
+            if (!reqs.length || !reqs.uppercase || !reqs.lowercase || !reqs.number || !reqs.special) {
+              showAlert('error', 'A senha informada não atende a todos os requisitos de segurança.');
+              if (passwordInput) passwordInput.focus();
+              return;
+            }
+          }
+
           if (submitBtn) {
             submitBtn.disabled = true;
             submitBtn.textContent = currentMode === 'signup' ? 'Criando conta...' : 'Autenticando...';
@@ -253,6 +398,7 @@ ${tokensCss}
           try {
             const endpoint = currentMode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
             const fallbackEndpoint = currentMode === 'signup' ? '/auth/signup' : '/auth/login';
+            // Nota de Segurança (SEC-04): payload estrito apenas com email e password
             const requestInit = {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
