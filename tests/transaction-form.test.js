@@ -1,7 +1,10 @@
 const {
   buildTransactionPayload,
+  buildParsePdfPayload,
   fetchCategories,
-  submitTransaction
+  submitTransaction,
+  parsePdfTransactions,
+  submitBatchTransactions
 } = require('../src/frontend/services/transactionsApi');
 
 const {
@@ -257,6 +260,136 @@ describe('Formulário de Input Manual de Transação (E04.T01)', () => {
           { token: 'jwt_token_valido', fetchImpl: mockFetch } // allowlist-secret
         )
       ).rejects.toThrow('Dados inválidos para criação da transação');
+    });
+  });
+
+  describe('Interface de Upload e Confirmação em Lote de PDF (E07.T02)', () => {
+    it('deve construir payload estrito do parser PDF ignorando campos extras e validando document_type', () => {
+      const result = buildParsePdfPayload({
+        pdf_base64: 'BASE64DATA',
+        file_name: 'extrato.pdf',
+        document_type: 'bank_statement',
+        reference_year: '2026',
+        user_id: '99999999-9999-4999-a999-999999999999'
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.payload).toEqual({
+        pdf_base64: 'BASE64DATA',
+        file_name: 'extrato.pdf',
+        document_type: 'BANK_STATEMENT',
+        reference_year: 2026
+      });
+      expect(result.payload.user_id).toBeUndefined();
+    });
+
+    it('deve enviar POST /api/transactions/parse-pdf com token ****** retornar transações extraídas', async () => {
+      const mockFetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          status: 'ok',
+          data: {
+            transactions: [
+              {
+                date: '2026-11-07',
+                amount: 248.9,
+                type: 'EXPENSE',
+                description: 'SUPERMERCADO CENTRAL'
+              }
+            ],
+            summary: { total_extracted: 1, review_required_count: 0 }
+          }
+        })
+      });
+
+      const result = await parsePdfTransactions(
+        {
+          pdf_base64: 'BASE64DATA',
+          document_type: 'BANK_STATEMENT'
+        },
+        {
+          token: 'jwt_token_valido', // allowlist-secret
+          baseUrl: '/api',
+          fetchImpl: mockFetch
+        }
+      );
+
+      expect(result.transactions).toHaveLength(1);
+      const [parseUrl, parseOptions] = mockFetch.mock.calls[0];
+      expect(parseUrl).toBe('/api/transactions/parse-pdf');
+      expect(parseOptions).toMatchObject({
+        method: 'POST',
+        body: JSON.stringify({
+          pdf_base64: 'BASE64DATA',
+          document_type: 'BANK_STATEMENT'
+        })
+      });
+      expect(parseOptions.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      });
+      expect(parseOptions.headers.Authorization).toEqual(expect.any(String)); // allowlist-secret
+    });
+
+    it('deve enviar POST /api/transactions/batch com is_automated=true por padrão', async () => {
+      const mockFetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({
+          status: 'ok',
+          count: 1,
+          data: [
+            {
+              id: '99999999-9999-4999-a999-999999999999',
+              amount: 248.9,
+              date: '2026-11-07',
+              description: 'SUPERMERCADO CENTRAL',
+              category_id: '55555555-5555-4555-a555-555555555555',
+              is_automated: true
+            }
+          ]
+        })
+      });
+
+      const result = await submitBatchTransactions(
+        [
+          {
+            amount: '248.90',
+            date: '2026-11-07',
+            description: 'SUPERMERCADO CENTRAL',
+            category_id: '55555555-5555-4555-a555-555555555555'
+          }
+        ],
+        {
+          token: 'jwt_token_valido', // allowlist-secret
+          baseUrl: '/api',
+          fetchImpl: mockFetch
+        }
+      );
+
+      expect(result).toHaveLength(1);
+      const [batchUrl, batchOptions] = mockFetch.mock.calls[0];
+      expect(batchUrl).toBe('/api/transactions/batch');
+      expect(batchOptions).toMatchObject({
+        method: 'POST',
+        body: JSON.stringify({
+          transactions: [
+            {
+              amount: 248.9,
+              date: '2026-11-07',
+              category_id: '55555555-5555-4555-a555-555555555555',
+              description: 'SUPERMERCADO CENTRAL',
+              is_automated: true
+            }
+          ]
+        })
+      });
+      expect(batchOptions.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      });
+      expect(batchOptions.headers.Authorization).toEqual(expect.any(String)); // allowlist-secret
     });
   });
 });

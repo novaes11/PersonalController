@@ -239,10 +239,179 @@ async function deleteTransactionById(transactionId, options = {}) {
   return body.data;
 }
 
+/**
+ * Normaliza payload do parser PDF para POST /api/transactions/parse-pdf (E07.T02).
+ * Campos adicionais não são propagados para manter compatibilidade com schema .strict().
+ * @param {object} rawInput
+ * @returns {{ valid: boolean, errors: Array<{field: string, message: string}>, payload?: object }}
+ */
+function buildParsePdfPayload(rawInput = {}) {
+  const errors = [];
+  const payload = {};
+
+  const hasBase64 = typeof rawInput.pdf_base64 === 'string' && rawInput.pdf_base64.trim().length > 0;
+  const hasRawText = typeof rawInput.raw_text === 'string' && rawInput.raw_text.trim().length > 0;
+
+  if (!hasBase64 && !hasRawText) {
+    errors.push({
+      field: 'pdf_base64',
+      message: 'Informe um arquivo PDF válido ou raw_text para extração.'
+    });
+  }
+
+  if (hasBase64) {
+    payload.pdf_base64 = String(rawInput.pdf_base64).trim();
+  }
+  if (hasRawText) {
+    payload.raw_text = String(rawInput.raw_text).trim();
+  }
+
+  const fileName = rawInput.file_name !== undefined && rawInput.file_name !== null
+    ? String(rawInput.file_name).trim()
+    : '';
+  if (fileName) {
+    payload.file_name = fileName;
+  }
+
+  const allowedDocumentTypes = new Set(['AUTO', 'BANK_STATEMENT', 'CREDIT_CARD_INVOICE']);
+  const documentType = rawInput.document_type ? String(rawInput.document_type).trim().toUpperCase() : '';
+  if (documentType) {
+    if (!allowedDocumentTypes.has(documentType)) {
+      errors.push({
+        field: 'document_type',
+        message: 'Tipo de documento inválido para parse de PDF.'
+      });
+    } else {
+      payload.document_type = documentType;
+    }
+  }
+
+  if (rawInput.reference_year !== undefined && rawInput.reference_year !== null && rawInput.reference_year !== '') {
+    const referenceYear = Number(rawInput.reference_year);
+    if (!Number.isInteger(referenceYear) || referenceYear < 2000 || referenceYear > 2100) {
+      errors.push({
+        field: 'reference_year',
+        message: 'O ano de referência deve estar entre 2000 e 2100.'
+      });
+    } else {
+      payload.reference_year = referenceYear;
+    }
+  }
+
+  if (errors.length > 0) {
+    return { valid: false, errors };
+  }
+
+  return { valid: true, errors: [], payload };
+}
+
+/**
+ * Envia arquivo/metadata para extração de transações de PDF via POST /api/transactions/parse-pdf.
+ * @param {object} parseInput
+ * @param {object} [options]
+ * @param {string} [options.token] JWT do usuário autenticado
+ * @param {string} [options.baseUrl='/api']
+ * @param {Function} [options.fetchImpl=global.fetch]
+ */
+async function parsePdfTransactions(parseInput, options = {}) {
+  const { token, baseUrl = '/api', fetchImpl = global.fetch } = options;
+  const validation = buildParsePdfPayload(parseInput);
+
+  if (!validation.valid) {
+    const err = new Error(validation.errors[0].message);
+    err.validationErrors = validation.errors;
+    err.status = 400;
+    throw err;
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+
+  const response = await fetchImpl(`${baseUrl}/transactions/parse-pdf`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(validation.payload)
+  });
+
+  const body = await response.json();
+  if (!response.ok || body.status === 'error') {
+    const err = new Error(body.message || `Erro ao processar PDF (HTTP ${response.status})`);
+    err.status = response.status;
+    err.errors = body.errors || [];
+    throw err;
+  }
+
+  return body.data;
+}
+
+/**
+ * Confirma importação em lote de transações extraídas de PDF via POST /api/transactions/batch.
+ * @param {Array<object>} transactions
+ * @param {object} [options]
+ * @param {string} [options.token] JWT do usuário autenticado
+ * @param {string} [options.baseUrl='/api']
+ * @param {Function} [options.fetchImpl=global.fetch]
+ */
+async function submitBatchTransactions(transactions, options = {}) {
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    const err = new Error('Selecione ao menos uma transação para importação em lote.');
+    err.status = 400;
+    throw err;
+  }
+
+  const normalizedTransactions = transactions.map(tx => {
+    const normalized = {
+      amount: Number(tx.amount),
+      date: tx.date ? String(tx.date).trim() : '',
+      category_id: tx.category_id ? String(tx.category_id).trim() : null,
+      description: tx.description !== undefined && tx.description !== null
+        ? String(tx.description).trim()
+        : null,
+      is_automated: tx.is_automated !== false
+    };
+
+    return normalized;
+  });
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+
+  const { token, baseUrl = '/api', fetchImpl = global.fetch } = options;
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+
+  const response = await fetchImpl(`${baseUrl}/transactions/batch`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ transactions: normalizedTransactions })
+  });
+
+  const body = await response.json();
+  if (!response.ok || body.status === 'error') {
+    const err = new Error(body.message || `Erro na confirmação em lote (HTTP ${response.status})`);
+    err.status = response.status;
+    err.errors = body.errors || [];
+    throw err;
+  }
+
+  return body.data;
+}
+
 module.exports = {
   buildTransactionPayload,
+  buildParsePdfPayload,
   fetchCategories,
   submitTransaction,
   fetchTransactions,
-  deleteTransactionById
+  deleteTransactionById,
+  parsePdfTransactions,
+  submitBatchTransactions
 };

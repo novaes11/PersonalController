@@ -62,6 +62,65 @@ function renderInboxViewMarkup() {
     </li>`;
   }).join('');
 
+  const extractedPreview = [
+    {
+      id: 'tx-preview-1',
+      date: '07/11/2026',
+      description: 'SUPERMERCADO CENTRAL',
+      amount: '- R$ 248,90',
+      status: 'Alta confiança',
+      statusClass: 'text-emerald-300 border-emerald-800/70 bg-emerald-950/40',
+      categoryName: 'Alimentação'
+    },
+    {
+      id: 'tx-preview-2',
+      date: '08/11/2026',
+      description: 'UBER *TRIP 3321',
+      amount: '- R$ 32,50',
+      status: 'Revisar',
+      statusClass: 'text-amber-300 border-amber-800/70 bg-amber-950/40',
+      categoryName: 'Transporte'
+    },
+    {
+      id: 'tx-preview-3',
+      date: '10/11/2026',
+      description: 'CREDITO SALARIO EMPRESA',
+      amount: '+ R$ 8.500,00',
+      status: 'Alta confiança',
+      statusClass: 'text-emerald-300 border-emerald-800/70 bg-emerald-950/40',
+      categoryName: 'Salário'
+    }
+  ];
+
+  const extractedPreviewHtml = extractedPreview.map(tx => `
+    <li data-testid="pdf-reconcile-row-${tx.id}" class="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+      <div class="flex items-start justify-between gap-3">
+        <div class="space-y-1">
+          <p class="text-xs text-slate-400">${escapeHtml(tx.date)}</p>
+          <p class="text-sm font-semibold text-slate-100">${escapeHtml(tx.description)}</p>
+          <p class="text-sm font-semibold ${tx.amount.startsWith('+') ? 'text-emerald-300' : 'text-rose-300'}">${escapeHtml(tx.amount)}</p>
+        </div>
+        <span class="inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${tx.statusClass}">
+          ${escapeHtml(tx.status)}
+        </span>
+      </div>
+      <div class="mt-3 space-y-2">
+        <label class="text-xs text-slate-400" for="pdf-category-${tx.id}">Categoria sugerida</label>
+        <select
+          id="pdf-category-${tx.id}"
+          data-testid="pdf-category-select-${tx.id}"
+          class="touch-target w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+          style="min-height: 44px; min-width: 44px;"
+        >
+          <option>${escapeHtml(tx.categoryName)}</option>
+          <option>Transferência</option>
+          <option>Assinaturas</option>
+          <option>Outros</option>
+        </select>
+      </div>
+    </li>
+  `).join('');
+
   return `<div data-testid="inbox-view" class="space-y-6 max-w-4xl mx-auto">
     <!-- Header com Badge de Área Experimental -->
     <div class="rounded-2xl border border-amber-500/30 bg-amber-950/10 p-5 md:p-6 shadow-sm">
@@ -91,22 +150,63 @@ function renderInboxViewMarkup() {
       </ul>
     </div>
 
-    <!-- Status das Automações em Background -->
+    <!-- Upload Mobile-First de PDF e Conciliação -->
     <div class="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 md:p-6 shadow-sm">
-      <h3 class="text-sm font-bold text-slate-100 mb-3">Automações Cloud-Native Ativas</h3>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-        <div class="p-3 rounded-lg bg-slate-950/40 border border-slate-800">
-          <span class="text-slate-400 block">Extrator de Faturas PDF</span>
-          <span class="font-semibold text-slate-200 block mt-1">Épico 07 (Em breve)</span>
+      <h3 class="text-sm font-bold text-slate-100">Upload, Conciliação e Confirmação em Lote de PDF</h3>
+      <p class="mt-1 text-xs text-slate-400">Fluxo mobile-first para enviar extratos/faturas, revisar categorias e confirmar importação em lote.</p>
+
+      <form id="pdf-upload-form" data-testid="pdf-upload-form" class="mt-4 space-y-3">
+        <label for="pdf-file-input" class="text-xs font-semibold text-slate-300 block">Arquivo PDF do extrato ou fatura</label>
+        <input
+          id="pdf-file-input"
+          data-testid="pdf-file-input"
+          type="file"
+          accept="application/pdf"
+          class="touch-target w-full rounded-lg border border-slate-700 bg-slate-950/50 px-3 py-2 text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white"
+          style="min-height: 44px; min-width: 44px;"
+        />
+        <button
+          type="submit"
+          data-testid="pdf-parse-btn"
+          class="touch-target w-full inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
+          style="min-height: 44px; min-width: 44px;"
+        >
+          Extrair transações do PDF
+        </button>
+      </form>
+
+      <div data-testid="pdf-reconcile-summary" class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+        <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+          <span class="text-slate-400 block">Extraídas</span>
+          <span class="font-semibold text-slate-100 block mt-1">3 transações</span>
         </div>
-        <div class="p-3 rounded-lg bg-slate-950/40 border border-slate-800">
-          <span class="text-slate-400 block">Notion Sync Worker</span>
-          <span class="font-semibold text-emerald-400 block mt-1">Operacional</span>
+        <div class="rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
+          <span class="text-amber-300 block">Revisar</span>
+          <span class="font-semibold text-amber-200 block mt-1">1 transação</span>
         </div>
-        <div class="p-3 rounded-lg bg-slate-950/40 border border-slate-800">
-          <span class="text-slate-400 block">CodeQL SAST</span>
-          <span class="font-semibold text-emerald-400 block mt-1">Ativo</span>
+        <div class="rounded-lg border border-emerald-800/60 bg-emerald-950/20 px-3 py-2">
+          <span class="text-emerald-300 block">Alta confiança</span>
+          <span class="font-semibold text-emerald-200 block mt-1">2 transações</span>
         </div>
+      </div>
+
+      <ul data-testid="pdf-reconcile-list" class="mt-4 space-y-3">
+        ${extractedPreviewHtml}
+      </ul>
+
+      <div
+        class="mt-4 border-t border-slate-800 pt-3 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between"
+        style="padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);"
+      >
+        <p class="text-xs text-slate-400">As transações serão importadas com is_automated=true e vinculadas ao usuário autenticado.</p>
+        <button
+          type="button"
+          data-testid="pdf-batch-confirm-btn"
+          class="touch-target inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
+          style="min-height: 48px; min-width: 48px;"
+        >
+          Confirmar importação em lote
+        </button>
       </div>
     </div>
   </div>`;
