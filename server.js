@@ -35,20 +35,83 @@ app.use((req, res, next) => {
   next();
 });
 
-// Suporte a CORS
-const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173')
-  .split(',')
-  .map(o => o.trim());
+// Suporte a CORS (incluindo Same-Origin, Vercel Preview Deployments e origens configuradas)
+function isOriginAllowed(origin, req) {
+  if (!origin) return true;
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-      return callback(null, true);
+  const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+
+  if (configuredOrigins.includes('*') || configuredOrigins.includes(origin)) {
+    return true;
+  }
+
+  const vercelEnvHosts = [
+    process.env.VERCEL_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ]
+    .filter(Boolean)
+    .map(h => h.replace(/^https?:\/\//, '').trim().toLowerCase());
+
+  let parsedOrigin;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch (_) {
+    return false;
+  }
+
+  const originHost = parsedOrigin.host.toLowerCase();
+  const originHostname = parsedOrigin.hostname.toLowerCase();
+
+  // 1. Permite requisições Same-Origin (quando o frontend servido pelo próprio app chama /api no mesmo host)
+  const forwardedHost = req?.headers?.['x-forwarded-host'];
+  const rawReqHost = (typeof forwardedHost === 'string' ? forwardedHost.split(',')[0] : '') || req?.headers?.host || '';
+  const reqHost = rawReqHost.trim().toLowerCase();
+  if (reqHost && originHost === reqHost) {
+    return true;
+  }
+
+  // 2. Permite URLs automáticas de deploy/preview da Vercel via variáveis de ambiente
+  if (vercelEnvHosts.includes(originHost) || vercelEnvHosts.includes(originHostname)) {
+    return true;
+  }
+
+  // 3. Permite subdomínios de Preview e Produção do projeto na Vercel (*.vercel.app)
+  if (
+    parsedOrigin.protocol === 'https:' &&
+    (/^personal-?controller(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(originHostname) ||
+      /^[a-z0-9-]+-novaes11[a-z0-9-]*\.vercel\.app$/i.test(originHostname))
+  ) {
+    return true;
+  }
+
+  // 4. Suporte a padrões com curinga em CORS_ALLOWED_ORIGINS (ex: https://*.vercel.app)
+  for (const pattern of configuredOrigins) {
+    if (pattern.includes('*')) {
+      const regexStr = '^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$';
+      if (new RegExp(regexStr, 'i').test(origin)) {
+        return true;
+      }
     }
-    return callback(new Error('Origem não permitida por CORS'));
-  },
-  credentials: true
-}));
+  }
+
+  return false;
+}
+
+app.use(
+  cors((req, callback) => {
+    const origin = req.header('Origin');
+    if (isOriginAllowed(origin, req)) {
+      return callback(null, { origin: true, credentials: true });
+    }
+    const corsError = new Error('Origem não permitida por CORS');
+    corsError.status = 403;
+    return callback(corsError);
+  })
+);
 
 // Parsing de JSON no corpo das requisições (limite de 8MB para suportar upload de PDF em Base64 de até 5MB - E07.T01)
 app.use(express.json({ limit: '8mb' }));

@@ -1,9 +1,188 @@
 /**
- * Cliente HTTP de Frontend para Autenticação e Modo Demonstração Interativo (E05.T03).
- * Compatível com os schemas Zod estritos de `/api/auth/login`, `/api/auth/signup` e `/api/auth/logout`.
+ * Cliente HTTP de Frontend para Autenticação, Gestão de Sessão e Modo Demonstração Interativo (E05.T03 & AUTH-02).
+ * Compatível com os schemas Zod estritos de `/api/auth/login`, `/api/auth/signup`, `/api/auth/logout` e `/api/auth/me`.
  */
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SESSION_STORAGE_KEY = 'pc_auth_session';
+
+/**
+ * Traduz mensagens técnicas de erro de autenticação ou rede para mensagens amigáveis em português.
+ */
+function translateAuthError(rawMessage, mode = 'login') {
+  if (!rawMessage) {
+    return mode === 'signup'
+      ? 'Falha ao criar conta. Verifique os dados informados.'
+      : 'Credenciais inválidas';
+  }
+
+  const msg = String(rawMessage).trim();
+  const lower = msg.toLowerCase();
+
+  if (
+    lower.includes('already registered') ||
+    lower.includes('already exists') ||
+    lower.includes('user_already_exists')
+  ) {
+    return 'Este endereço de e-mail já está cadastrado. Tente entrar na conta.';
+  }
+
+  if (lower.includes('invalid login credentials') || lower.includes('invalid_credentials')) {
+    return 'Credenciais inválidas: e-mail ou senha incorretos.';
+  }
+
+  if (lower.includes('email not confirmed') || lower.includes('email_not_confirmed')) {
+    return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+  }
+
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network error') ||
+    lower.includes('econnrefused')
+  ) {
+    return 'Falha de conexão com o servidor. Verifique sua internet e tente novamente.';
+  }
+
+  return msg;
+}
+
+/**
+ * Constrói o registro padronizado de sessão (`pc_auth_session`) compatível com AuthView, Dashboard e DataSyncService.
+ */
+function buildSessionRecord({ user = null, session = null, token = null, isDemo = false } = {}) {
+  const demoFlag = Boolean(isDemo || (user && user.isDemo === true));
+  const resolvedToken = demoFlag
+    ? (token || 'demo-token-' + Date.now()) // allowlist-secret
+    : (token || (session && session.access_token) || null); // allowlist-secret
+
+  const normalizedUser = user
+    ? {
+        id: user.id || (demoFlag ? '00000000-0000-4000-8000-000000000001' : null),
+        email: user.email || (demoFlag ? 'demo@personalcontroller.app' : ''),
+        ...(user.created_at ? { created_at: user.created_at } : {}),
+        isDemo: demoFlag
+      }
+    : null;
+
+  const normalizedSession = demoFlag
+    ? (session || { token_type: 'demo', expires_at: null }) // allowlist-secret
+    : (session
+        ? {
+            ...session,
+            access_token: session.access_token || resolvedToken, // allowlist-secret
+            token_type: session.token_type || 'bearer' // allowlist-secret
+          }
+        : (resolvedToken
+            ? { access_token: resolvedToken, token_type: 'bearer', expires_at: null } // allowlist-secret
+            : null));
+
+  return {
+    token: resolvedToken, // allowlist-secret
+    user: normalizedUser,
+    session: normalizedSession,
+    isDemo: demoFlag,
+    isDemoMode: demoFlag
+  };
+}
+
+/**
+ * Salva a sessão autenticada no armazenamento fornecido (ou localStorage/sessionStorage no browser).
+ */
+function saveAuthSession(sessionInput, customStorage = null) {
+  const record = buildSessionRecord(sessionInput);
+  const serialized = JSON.stringify(record);
+
+  if (customStorage && typeof customStorage.setItem === 'function') {
+    customStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    return record;
+  }
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage && typeof globalThis.localStorage.setItem === 'function') {
+      globalThis.localStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.sessionStorage && typeof globalThis.sessionStorage.setItem === 'function') {
+      globalThis.sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    }
+  } catch (_) {}
+
+  return record;
+}
+
+/**
+ * Carrega e valida a sessão persistida no cliente.
+ */
+function loadAuthSession(customStorage = null) {
+  let raw = null;
+
+  if (customStorage && typeof customStorage.getItem === 'function') {
+    raw = customStorage.getItem(SESSION_STORAGE_KEY);
+  } else {
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.localStorage && typeof globalThis.localStorage.getItem === 'function') {
+        raw = globalThis.localStorage.getItem(SESSION_STORAGE_KEY);
+      }
+    } catch (_) {}
+
+    if (!raw) {
+      try {
+        if (typeof globalThis !== 'undefined' && globalThis.sessionStorage && typeof globalThis.sessionStorage.getItem === 'function') {
+          raw = globalThis.sessionStorage.getItem(SESSION_STORAGE_KEY);
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!raw) return null;
+
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const isDemo = Boolean(parsed.isDemo === true || parsed.isDemoMode === true || (parsed.user && parsed.user.isDemo === true));
+    const token = parsed.token || (parsed.session && parsed.session.access_token) || null;
+
+    if (!isDemo && (!token || String(token).startsWith('session-'))) {
+      return null;
+    }
+
+    return buildSessionRecord({
+      user: parsed.user,
+      session: parsed.session,
+      token,
+      isDemo
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Remove a sessão persistida do armazenamento do cliente.
+ */
+function clearAuthSession(customStorage = null) {
+  if (customStorage && typeof customStorage.removeItem === 'function') {
+    customStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage && typeof globalThis.localStorage.removeItem === 'function') {
+      globalThis.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.sessionStorage && typeof globalThis.sessionStorage.removeItem === 'function') {
+      globalThis.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+}
 
 /**
  * Valida e normaliza credenciais de login/cadastro garantindo payload estrito (SEC-04).
@@ -59,27 +238,52 @@ async function loginUser(credentials, options = {}) {
     throw err;
   }
 
-  const response = await fetchImpl(`${baseUrl}/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    body: JSON.stringify(validation.payload)
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(validation.payload)
+    });
+  } catch (networkErr) {
+    const err = new Error('Falha de conexão com o servidor. Verifique sua internet e tente novamente.');
+    err.code = 'NETWORK_ERROR';
+    err.cause = networkErr;
+    throw err;
+  }
 
-  const body = await response.json();
+  let body = {};
+  try {
+    body = await response.json();
+  } catch (_) {
+    body = {};
+  }
 
   if (!response.ok || body.status === 'error') {
-    const err = new Error(body.message || `Falha na autenticação (HTTP ${response.status})`);
+    const firstFieldError = Array.isArray(body.errors) && body.errors[0]?.message;
+    const rawMsg = firstFieldError || body.message || `Falha na autenticação (HTTP ${response.status})`;
+    const err = new Error(translateAuthError(rawMsg, 'login'));
     err.status = response.status;
     err.errors = body.errors || [];
     throw err;
   }
 
+  const token = body.token || body.session?.access_token || null; // allowlist-secret
+  const session = body.session
+    ? {
+        ...body.session,
+        access_token: body.session.access_token || token, // allowlist-secret
+        token_type: body.session.token_type || 'bearer' // allowlist-secret
+      }
+    : (token ? { access_token: token, token_type: 'bearer', expires_at: null } : null); // allowlist-secret
+
   return {
     user: body.user || null,
-    session: body.session || null,
+    session,
+    token,
     message: body.message || 'Autenticado com sucesso'
   };
 }
@@ -98,29 +302,98 @@ async function signupUser(credentials, options = {}) {
     throw err;
   }
 
-  const response = await fetchImpl(`${baseUrl}/auth/signup`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    body: JSON.stringify(validation.payload)
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(validation.payload)
+    });
+  } catch (networkErr) {
+    const err = new Error('Falha de conexão com o servidor. Verifique sua internet e tente novamente.');
+    err.code = 'NETWORK_ERROR';
+    err.cause = networkErr;
+    throw err;
+  }
 
-  const body = await response.json();
+  let body = {};
+  try {
+    body = await response.json();
+  } catch (_) {
+    body = {};
+  }
 
   if (!response.ok || body.status === 'error') {
-    const err = new Error(body.message || `Falha ao criar conta (HTTP ${response.status})`);
+    const firstFieldError = Array.isArray(body.errors) && body.errors[0]?.message;
+    const rawMsg = firstFieldError || body.message || `Falha ao criar conta (HTTP ${response.status})`;
+    const err = new Error(translateAuthError(rawMsg, 'signup'));
     err.status = response.status;
     err.errors = body.errors || [];
     throw err;
   }
 
+  const token = body.token || body.session?.access_token || null; // allowlist-secret
+  const session = body.session
+    ? {
+        ...body.session,
+        access_token: body.session.access_token || token, // allowlist-secret
+        token_type: body.session.token_type || 'bearer' // allowlist-secret
+      }
+    : (token ? { access_token: token, token_type: 'bearer', expires_at: null } : null); // allowlist-secret
+  const requiresEmailConfirmation = Boolean(body.requiresEmailConfirmation || !token);
+
   return {
     user: body.user || null,
-    session: body.session || null,
-    message: body.message || 'Usuário cadastrado com sucesso'
+    session,
+    token,
+    requiresEmailConfirmation,
+    message:
+      body.message ||
+      (requiresEmailConfirmation
+        ? 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+        : 'Usuário cadastrado com sucesso')
   };
+}
+
+/**
+ * Obtém o perfil do usuário autenticado via GET /api/auth/me.
+ */
+async function fetchCurrentUser(options = {}) {
+  const { token, baseUrl = '/api', fetchImpl = global.fetch } = options;
+
+  if (!token) {
+    const err = new Error('Token de autenticação ausente.');
+    err.status = 401;
+    throw err;
+  }
+
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/auth/me`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    });
+  } catch (networkErr) {
+    const err = new Error('Falha de conexão ao validar sessão.');
+    err.code = 'NETWORK_ERROR';
+    err.cause = networkErr;
+    throw err;
+  }
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.status === 'error') {
+    const err = new Error(body.message || 'Sessão expirada ou inválida');
+    err.status = response.status;
+    throw err;
+  }
+
+  return body.user || null;
 }
 
 /**
@@ -297,9 +570,16 @@ function createDemoDataset() {
 }
 
 module.exports = {
+  SESSION_STORAGE_KEY,
+  translateAuthError,
+  buildSessionRecord,
+  saveAuthSession,
+  loadAuthSession,
+  clearAuthSession,
   buildAuthPayload,
   loginUser,
   signupUser,
+  fetchCurrentUser,
   logoutUser,
   createDemoDataset
 };
