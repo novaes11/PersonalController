@@ -47,6 +47,10 @@ function formatAuthErrorMessage(rawMessage, mode = 'login') {
     return 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
   }
 
+  if (lower.includes('fetch failed') || lower.includes('failed to fetch') || lower.includes('enotfound')) {
+    return 'Serviço de autenticação temporariamente indisponível. Verifique a configuração do Supabase.';
+  }
+
   return msg;
 }
 

@@ -196,6 +196,9 @@ ${tokensCss}
         if (lower.includes('rate limit') || lower.includes('muitas tentativas')) {
           return 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
         }
+        if (lower.includes('fetch failed') || lower.includes('failed to fetch')) {
+          return 'Falha de comunicação com o servidor de autenticação. Tente novamente em instantes.';
+        }
         return rawMessage;
       }
 

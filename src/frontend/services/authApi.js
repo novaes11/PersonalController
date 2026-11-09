@@ -36,6 +36,7 @@ function translateAuthError(rawMessage, mode = 'login') {
   }
 
   if (
+    lower.includes('fetch failed') ||
     lower.includes('failed to fetch') ||
     lower.includes('networkerror') ||
     lower.includes('network error') ||
