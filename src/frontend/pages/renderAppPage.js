@@ -325,19 +325,47 @@ ${tokensCss}
         });
       });
 
-      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações (E06.T03)
+      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações (E06.T03 & AUTH-02)
       try {
         var rawSession = localStorage.getItem('pc_auth_session') || sessionStorage.getItem('pc_auth_session');
         if (rawSession) {
           var parsedSession = JSON.parse(rawSession);
           var sessionUser = parsedSession && parsedSession.user;
-          var rawToken = parsedSession && typeof parsedSession.token === 'string' ? parsedSession.token.trim() : '';
-          var isRealAuthSession = parsedSession && parsedSession.isDemo === false && rawToken && !rawToken.startsWith('demo-token-');
+          var rawToken =
+            (parsedSession && typeof parsedSession.token === 'string' && parsedSession.token.trim()) ||
+            (parsedSession && parsedSession.session && typeof parsedSession.session.access_token === 'string' && parsedSession.session.access_token.trim()) ||
+            '';
+          var isExplicitDemo = Boolean(
+            !parsedSession ||
+            parsedSession.isDemo === true ||
+            parsedSession.isDemoMode === true ||
+            (sessionUser && sessionUser.isDemo === true)
+          );
+          var isRealAuthSession = Boolean(
+            !isExplicitDemo &&
+            rawToken &&
+            !rawToken.startsWith('demo-token-') &&
+            !rawToken.startsWith('session-')
+          );
 
           state.isDemo = !isRealAuthSession;
           state.token = isRealAuthSession ? rawToken : null; // allowlist-secret
           if (sessionUser) {
-            state.user = sessionUser;
+            state.user = Object.assign({}, sessionUser, { isDemo: state.isDemo });
+          }
+
+          if (isRealAuthSession) {
+            state.transactions = [];
+            state.categories = [];
+            state.portfolio = {
+              total_portfolio_value: 0,
+              total_invested_value: 0,
+              total_profit_loss: 0,
+              total_profit_loss_percentage: 0,
+              positions_count: 0,
+              allocation_by_type: {},
+              positions: []
+            };
           }
 
           if (sessionUser && sessionUser.email) {
@@ -356,6 +384,18 @@ ${tokensCss}
 
       // Ação Unificada de Logout / Retorno para Login
       function handleLogout() {
+        var activeToken = state.token; // allowlist-secret
+        if (!state.isDemo && activeToken) {
+          try {
+            fetch('/api/auth/logout', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json',
+                'Authorization': 'Bearer ' + activeToken
+              }
+            }).catch(function () {});
+          } catch (_) {}
+        }
         try {
           localStorage.removeItem('pc_auth_session');
           sessionStorage.removeItem('pc_auth_session');
@@ -1086,6 +1126,29 @@ ${tokensCss}
           }
         }
 
+        // Atualiza Gráfico Donut de Distribuição de Ativos nas abas Visão Geral e Carteira
+        var chartCols = document.querySelectorAll('[data-testid="dashboard-chart-col"], [data-testid="portfolio-chart-col"]');
+        if (chartCols.length > 0 && positions.length === 0) {
+          var emptyChartHtml =
+            '<section id="asset-allocation-chart-section" aria-label="Gráfico de distribuição de ativos" class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg text-slate-100">' +
+            '<h2 class="text-lg font-semibold text-white tracking-tight">Distribuição de Ativos</h2>' +
+            '<p class="text-sm text-slate-400 mt-4 text-center py-6">Nenhum ativo em custódia para exibir no gráfico.</p>' +
+            '</section>';
+          chartCols.forEach(function (col) { col.innerHTML = emptyChartHtml; });
+        }
+
+        // Atualiza contadores das pílulas de filtro da carteira
+        document.querySelectorAll('.portfolio-filter-pill').forEach(function (pill) {
+          var fType = pill.getAttribute('data-portfolio-filter') || 'ALL';
+          var badgeSpan = pill.querySelectorAll('span')[1];
+          if (badgeSpan) {
+            var typeCount = fType === 'ALL'
+              ? positions.length
+              : positions.filter(function (p) { return (p.asset_type || 'OTHER') === fType; }).length;
+            badgeSpan.textContent = String(typeCount);
+          }
+        });
+
         applyPortfolioFilters();
 
         // Atualiza Categorias na aba Configurações
@@ -1274,6 +1337,7 @@ ${tokensCss}
 
       // Carrega automaticamente os dados reais do Supabase se a sessão for autenticada
       if (!state.isDemo && state.token) {
+        recalculateAndRender({ rebuildLists: true });
         syncFromSupabaseApi({ refreshPortfolio: false, silent: true });
       }
     })();
