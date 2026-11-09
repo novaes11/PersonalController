@@ -147,7 +147,7 @@ describe('E06.T02 — Ativação Funcional de Todos os Botões, Header, Sidebar 
     expect(markup).toContain('data-testid="settings-logout-btn"');
   });
 
-  test('5. InboxView: renderiza área experimental com alertas de burn rate, worker de cotações e status das automações', () => {
+  test('5. InboxView: renderiza interface mobile-first de upload, conciliação e confirmação em lote de PDF', () => {
     const markup = renderInboxViewMarkup();
 
     expect(markup).toContain('data-testid="inbox-view"');
@@ -155,8 +155,15 @@ describe('E06.T02 — Ativação Funcional de Todos os Botões, Header, Sidebar 
     expect(markup).toContain('data-testid="inbox-alert-burn-rate"');
     expect(markup).toContain('data-testid="inbox-alert-quotes-sync"');
     expect(markup).toContain('data-testid="inbox-alert-notion-sync"');
-    expect(markup).toContain('Notion Sync Worker');
-    expect(markup).toContain('CodeQL SAST');
+    expect(markup).toContain('data-testid="pdf-upload-form"');
+    expect(markup).toContain('data-testid="pdf-file-input"');
+    expect(markup).toContain('data-testid="pdf-parse-btn"');
+    expect(markup).toContain('data-testid="pdf-reconcile-summary"');
+    expect(markup).toContain('data-testid="pdf-reconcile-list"');
+    expect(markup).toContain('data-testid="pdf-batch-confirm-btn"');
+    expect(markup).toContain('min-height: 44px; min-width: 44px;');
+    expect(markup).toContain('min-height: 48px; min-width: 48px;');
+    expect(markup).toContain('env(safe-area-inset-bottom, 0px)');
   });
 
   test('6. Runtime interativo do cliente possui manipuladores para botões de header, sidebar, refresh com spin e troca de abas', () => {
