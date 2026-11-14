@@ -325,14 +325,26 @@ ${tokensCss}
         });
       });
 
-      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações (E06.T03)
+      // Sincronização da Sessão Autenticada ou Modo Demonstração no Header, Sidebar e Configurações (E06.T03 & AUTH-02)
       try {
         var rawSession = localStorage.getItem('pc_auth_session') || sessionStorage.getItem('pc_auth_session');
         if (rawSession) {
           var parsedSession = JSON.parse(rawSession);
           var sessionUser = parsedSession && parsedSession.user;
-          var rawToken = parsedSession && typeof parsedSession.token === 'string' ? parsedSession.token.trim() : '';
-          var isRealAuthSession = parsedSession && parsedSession.isDemo === false && rawToken && !rawToken.startsWith('demo-token-');
+          var candidateToken = parsedSession && typeof parsedSession.token === 'string'
+            ? parsedSession.token
+            : (parsedSession && parsedSession.session && typeof parsedSession.session.access_token === 'string'
+              ? parsedSession.session.access_token
+              : '');
+          var rawToken = candidateToken.trim();
+          var isRealAuthSession = Boolean(
+            parsedSession &&
+            parsedSession.isDemo !== true &&
+            parsedSession.isDemoMode !== true &&
+            rawToken &&
+            !rawToken.startsWith('demo-token-') &&
+            !rawToken.startsWith('session-')
+          );
 
           state.isDemo = !isRealAuthSession;
           state.token = isRealAuthSession ? rawToken : null; // allowlist-secret
@@ -355,19 +367,31 @@ ${tokensCss}
       } catch (e) {}
 
       // Ação Unificada de Logout / Retorno para Login
-      function handleLogout() {
+      function handleLogout(reason) {
+        var activeToken = state.token; // allowlist-secret
         try {
           localStorage.removeItem('pc_auth_session');
           sessionStorage.removeItem('pc_auth_session');
         } catch (err) {}
-        window.location.href = '/login?logout=true';
+        if (!state.isDemo && activeToken && typeof fetch === 'function') {
+          try {
+            fetch('/api/auth/logout', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json',
+                'Authorization': 'Bearer ' + activeToken
+              }
+            }).catch(function () {});
+          } catch (e) {}
+        }
+        window.location.href = reason === 'expired' ? '/login?session_expired=true' : '/login?logout=true';
       }
 
       document.querySelectorAll('[data-testid="logout-btn"], [data-testid="account-indicator"], [data-testid="sidebar-account-indicator"], [data-testid="settings-logout-btn"]')
         .forEach(function (el) {
           el.style.cursor = 'pointer';
           el.title = 'Clique para sair da conta ou trocar de usuário';
-          el.addEventListener('click', handleLogout);
+          el.addEventListener('click', function () { handleLogout('manual'); });
         });
 
       var TAB_META = {
@@ -1174,7 +1198,7 @@ ${tokensCss}
           var portRes = responses[2];
 
           if (catRes.status === 401 || txRes.status === 401) {
-            handleLogout();
+            handleLogout('expired');
             return;
           }
 

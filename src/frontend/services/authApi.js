@@ -1,9 +1,10 @@
 /**
- * Cliente HTTP de Frontend para Autenticação e Modo Demonstração Interativo (E05.T03).
- * Compatível com os schemas Zod estritos de `/api/auth/login`, `/api/auth/signup` e `/api/auth/logout`.
+ * Cliente HTTP de Frontend para Autenticação, Gestão de Sessão e Modo Demonstração (E05.T03 & AUTH-02).
+ * Compatível com os schemas Zod estritos de `/api/auth/login`, `/api/auth/signup`, `/api/auth/logout` e `/api/auth/me`.
  */
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SESSION_STORAGE_KEY = 'pc_auth_session';
 
 /**
  * Valida e normaliza credenciais de login/cadastro garantindo payload estrito (SEC-04).
@@ -13,9 +14,10 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function buildAuthPayload(rawInput = {}) {
   const errors = [];
   const email = rawInput.email ? String(rawInput.email).trim().toLowerCase() : '';
-  const password = rawInput.password !== undefined && rawInput.password !== null // allowlist-secret
-    ? String(rawInput.password)
-    : '';
+  const password =
+    rawInput.password !== undefined && rawInput.password !== null // allowlist-secret
+      ? String(rawInput.password)
+      : '';
 
   if (!email || !EMAIL_REGEX.test(email)) {
     errors.push({
@@ -43,6 +45,168 @@ function buildAuthPayload(rawInput = {}) {
       password
     }
   };
+}
+
+/**
+ * Constrói um objeto canônico de sessão compatível com AuthView, renderLandingPage,
+ * renderAppPage e dataSyncService (evitando queda acidental em modo demo).
+ */
+function buildSessionRecord({ user = null, session = null, token = null, isDemo = false } = {}) {
+  const resolvedToken = isDemo
+    ? token || `demo-token-${Date.now()}`
+    : (token || session?.access_token || null); // allowlist-secret
+  const expiresAt = session?.expires_at ?? null;
+  const normalizedUser = user
+    ? {
+        id: user.id || null,
+        email: user.email || '',
+        ...(user.created_at ? { created_at: user.created_at } : {}),
+        isDemo: Boolean(isDemo)
+      }
+    : null;
+
+  return {
+    token: resolvedToken, // allowlist-secret
+    expires_at: expiresAt,
+    isDemo: Boolean(isDemo),
+    isDemoMode: Boolean(isDemo),
+    user: normalizedUser,
+    session: isDemo
+      ? { token_type: 'demo', expires_at: null }
+      : session ||
+        (resolvedToken
+          ? {
+              access_token: resolvedToken, // allowlist-secret
+              expires_at: expiresAt,
+              token_type: 'bearer'
+            }
+          : null)
+  };
+}
+
+/**
+ * Verifica se o registro de sessão expirou com base no timestamp Unix `expires_at` (em segundos).
+ * @param {object|null} sessionRecord
+ * @param {number} [nowSeconds]
+ * @returns {boolean}
+ */
+function isSessionExpired(sessionRecord, nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (!sessionRecord || typeof sessionRecord !== 'object') return true;
+  if (sessionRecord.isDemo === true || sessionRecord.isDemoMode === true) return false;
+
+  const expiresAt = Number(sessionRecord.expires_at ?? sessionRecord.session?.expires_at ?? 0);
+  if (expiresAt > 0 && expiresAt <= nowSeconds) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Persiste a sessão autenticada no storage informado (ou localStorage/sessionStorage).
+ */
+function saveStoredSession(sessionInput, customStorage = null) {
+  const canonical =
+    sessionInput && ('isDemo' in sessionInput && 'token' in sessionInput && 'session' in sessionInput)
+      ? sessionInput
+      : buildSessionRecord({
+          user: sessionInput?.user || null,
+          session: sessionInput?.session || null,
+          token: sessionInput?.token || sessionInput?.session?.access_token || null, // allowlist-secret
+          isDemo: Boolean(sessionInput?.isDemo || sessionInput?.isDemoMode)
+        });
+
+  const serialized = JSON.stringify(canonical);
+
+  if (customStorage && typeof customStorage.setItem === 'function') {
+    customStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    return canonical;
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    }
+  } catch (_) {}
+
+  return canonical;
+}
+
+/**
+ * Remove a sessão armazenada do cliente.
+ */
+function clearStoredSession(customStorage = null) {
+  if (customStorage && typeof customStorage.removeItem === 'function') {
+    customStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+}
+
+/**
+ * Carrega e valida a sessão salva no cliente. Caso esteja expirada ou corrompida, limpa automaticamente.
+ */
+function loadStoredSession(customStorage = null, nowSeconds = Math.floor(Date.now() / 1000)) {
+  let raw = null;
+
+  if (customStorage && typeof customStorage.getItem === 'function') {
+    raw = customStorage.getItem(SESSION_STORAGE_KEY);
+  } else {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        raw = localStorage.getItem(SESSION_STORAGE_KEY);
+      }
+    } catch (_) {}
+
+    if (!raw) {
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!raw) return null;
+
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') {
+      clearStoredSession(customStorage);
+      return null;
+    }
+
+    if (isSessionExpired(parsed, nowSeconds)) {
+      clearStoredSession(customStorage);
+      return null;
+    }
+
+    return buildSessionRecord({
+      user: parsed.user || null,
+      session: parsed.session || null,
+      token: parsed.token || parsed.session?.access_token || null, // allowlist-secret
+      isDemo: Boolean(parsed.isDemo || parsed.isDemoMode)
+    });
+  } catch (_) {
+    clearStoredSession(customStorage);
+    return null;
+  }
 }
 
 /**
@@ -77,9 +241,12 @@ async function loginUser(credentials, options = {}) {
     throw err;
   }
 
+  const resolvedToken = body.token || body.session?.access_token || null; // allowlist-secret
+
   return {
+    token: resolvedToken, // allowlist-secret
     user: body.user || null,
-    session: body.session || null,
+    session: body.session || (resolvedToken ? { access_token: resolvedToken, token_type: 'bearer' } : null), // allowlist-secret
     message: body.message || 'Autenticado com sucesso'
   };
 }
@@ -116,11 +283,46 @@ async function signupUser(credentials, options = {}) {
     throw err;
   }
 
+  const resolvedToken = body.token || body.session?.access_token || null; // allowlist-secret
+
   return {
+    token: resolvedToken, // allowlist-secret
+    requires_email_confirmation: Boolean(body.requires_email_confirmation),
     user: body.user || null,
-    session: body.session || null,
+    session: body.session || (resolvedToken ? { access_token: resolvedToken, token_type: 'bearer' } : null), // allowlist-secret
     message: body.message || 'Usuário cadastrado com sucesso'
   };
+}
+
+/**
+ * Consulta o perfil do usuário autenticado via GET /api/auth/me.
+ */
+async function fetchCurrentUser(options = {}) {
+  const { token, baseUrl = '/api', fetchImpl = global.fetch } = options;
+
+  if (!token) {
+    const err = new Error('Token de autenticação ausente');
+    err.status = 401;
+    throw err;
+  }
+
+  const response = await fetchImpl(`${baseUrl}/auth/me`, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  const body = await response.json();
+
+  if (!response.ok || body.status === 'error') {
+    const err = new Error(body.message || `Sessão inválida (HTTP ${response.status})`);
+    err.status = response.status;
+    throw err;
+  }
+
+  return body.user || null;
 }
 
 /**
@@ -297,9 +499,16 @@ function createDemoDataset() {
 }
 
 module.exports = {
+  SESSION_STORAGE_KEY,
   buildAuthPayload,
+  buildSessionRecord,
+  isSessionExpired,
+  saveStoredSession,
+  loadStoredSession,
+  clearStoredSession,
   loginUser,
   signupUser,
+  fetchCurrentUser,
   logoutUser,
   createDemoDataset
 };

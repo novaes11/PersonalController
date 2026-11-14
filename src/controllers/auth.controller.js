@@ -13,6 +13,23 @@ function formatZodIssues(issues) {
   });
 }
 
+function normalizeAuthErrorMessage(rawMessage, mode = 'login') {
+  if (!rawMessage) {
+    return mode === 'signup' ? 'Erro ao realizar cadastro' : 'Credenciais inválidas';
+  }
+  const lower = String(rawMessage).toLowerCase();
+  if (lower.includes('already registered') || lower.includes('already exists')) {
+    return 'Usuário já cadastrado com este endereço de e-mail.';
+  }
+  if (lower.includes('invalid login credentials') || lower.includes('credenciais inválidas')) {
+    return 'Credenciais inválidas';
+  }
+  if (lower.includes('email not confirmed')) {
+    return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+  }
+  return rawMessage;
+}
+
 function resolveProfileDbClient(fallbackClient, accessToken) {
   if (process.env.SUPABASE_SERVICE_ROLE_KEY && typeof getSupabaseAdminClient === 'function') {
     return getSupabaseAdminClient();
@@ -50,19 +67,36 @@ async function signup(req, res) {
     if (error) {
       return res.status(400).json({
         status: 'error',
-        message: error.message
+        message: normalizeAuthErrorMessage(error.message, 'signup')
       });
     }
 
-    // Se o usuário foi criado, garante registro do perfil na tabela public.users
-    if (data.user) {
+    let activeSession = data?.session || null;
+
+    // Caso o provedor não retorne sessão imediata no signUp, tenta obter sessão via signInWithPassword
+    if (data?.user && !activeSession && typeof supabase.auth.signInWithPassword === 'function') {
       try {
-        const dbClient = resolveProfileDbClient(supabase, data.session?.access_token);
+        const signInAttempt = await supabase.auth.signInWithPassword({ email, password });
+        if (signInAttempt?.data?.session) {
+          activeSession = signInAttempt.data.session;
+        }
+      } catch (_) {
+        // Mantém activeSession como null caso confirmação de e-mail seja estritamente exigida
+      }
+    }
+
+    // Se o usuário foi criado, garante registro do perfil na tabela public.users
+    if (data?.user) {
+      try {
+        const dbClient = resolveProfileDbClient(supabase, activeSession?.access_token);
         if (dbClient && typeof dbClient.from === 'function') {
-          await dbClient.from('users').upsert({
-            id: data.user.id,
-            email: data.user.email
-          }, { onConflict: 'id' });
+          await dbClient.from('users').upsert(
+            {
+              id: data.user.id,
+              email: data.user.email
+            },
+            { onConflict: 'id' }
+          );
         }
       } catch (profileErr) {
         // Não bloqueia conclusão do cadastro caso confirmação de e-mail esteja pendente
@@ -71,12 +105,19 @@ async function signup(req, res) {
 
     return res.status(201).json({
       status: 'ok',
-      message: 'Usuário cadastrado com sucesso',
-      user: sanitizeUser(data.user),
-      session: data.session ? {
-        access_token: data.session.access_token, // allowlist-secret
-        expires_at: data.session.expires_at
-      } : null
+      message: activeSession
+        ? 'Usuário cadastrado com sucesso'
+        : 'Usuário cadastrado com sucesso. Confirme seu e-mail para ativar a sessão.',
+      requires_email_confirmation: !activeSession,
+      token: activeSession ? activeSession.access_token : null, // allowlist-secret
+      user: sanitizeUser(data?.user),
+      session: activeSession
+        ? {
+            access_token: activeSession.access_token, // allowlist-secret
+            expires_at: activeSession.expires_at,
+            token_type: activeSession.token_type || 'bearer'
+          }
+        : null
     });
   } catch (err) {
     return res.status(500).json({
@@ -109,19 +150,22 @@ async function login(req, res) {
     if (error) {
       return res.status(401).json({
         status: 'error',
-        message: 'Credenciais inválidas'
+        message: normalizeAuthErrorMessage(error.message, 'login')
       });
     }
 
     // Garante sincronização do perfil em public.users após login autenticado
-    if (data.user && data.session?.access_token) {
+    if (data?.user && data?.session?.access_token) {
       try {
         const dbClient = resolveProfileDbClient(supabase, data.session.access_token);
         if (dbClient && typeof dbClient.from === 'function') {
-          await dbClient.from('users').upsert({
-            id: data.user.id,
-            email: data.user.email
-          }, { onConflict: 'id' });
+          await dbClient.from('users').upsert(
+            {
+              id: data.user.id,
+              email: data.user.email
+            },
+            { onConflict: 'id' }
+          );
         }
       } catch (profileErr) {}
     }
@@ -129,11 +173,12 @@ async function login(req, res) {
     return res.status(200).json({
       status: 'ok',
       message: 'Autenticado com sucesso',
-      user: sanitizeUser(data.user),
+      token: data?.session?.access_token || null, // allowlist-secret
+      user: sanitizeUser(data?.user),
       session: {
-        access_token: data.session?.access_token, // allowlist-secret
-        expires_at: data.session?.expires_at,
-        token_type: data.session?.token_type || 'bearer'
+        access_token: data?.session?.access_token, // allowlist-secret
+        expires_at: data?.session?.expires_at,
+        token_type: data?.session?.token_type || 'bearer'
       }
     });
   } catch (err) {
@@ -176,6 +221,7 @@ async function getMe(req, res) {
 }
 
 module.exports = {
+  normalizeAuthErrorMessage,
   signup,
   login,
   logout,

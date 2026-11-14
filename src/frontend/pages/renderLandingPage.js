@@ -116,12 +116,36 @@ ${tokensCss}
         } catch (err) {}
       }
 
-      // Auto-redirecionamento se já houver sessão ativa salva
+      function clearSessionStorage() {
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+        try {
+          sessionStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+      }
+
+      const searchQuery = window.location.search || '';
+      const isLogoutRedirect = searchQuery.includes('logout=true');
+      const isSessionExpiredRedirect = searchQuery.includes('session_expired=true');
+
+      if (isLogoutRedirect || isSessionExpiredRedirect) {
+        clearSessionStorage();
+      }
+
+      // Auto-redirecionamento se já houver sessão ativa e não expirada salva
       try {
         const existingSession = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
-        if (existingSession && !window.location.search.includes('logout=true')) {
+        if (existingSession && !isLogoutRedirect && !isSessionExpiredRedirect) {
           const parsed = JSON.parse(existingSession);
-          if (parsed && (parsed.token || parsed.isDemo)) {
+          const resolvedToken = parsed && (parsed.token || (parsed.session && parsed.session.access_token));
+          const expiresAt = Number((parsed && (parsed.expires_at || (parsed.session && parsed.session.expires_at))) || 0);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const isExpired = expiresAt > 0 && expiresAt <= nowSec;
+
+          if (isExpired) {
+            clearSessionStorage();
+          } else if (parsed && (resolvedToken || parsed.isDemo || parsed.isDemoMode)) {
             window.location.href = '/dashboard';
             return;
           }
@@ -161,6 +185,10 @@ ${tokensCss}
       function clearAlerts() {
         document.querySelectorAll('[data-testid="auth-error-alert"], [data-testid="auth-success-alert"]')
           .forEach(el => el.remove());
+      }
+
+      if (isSessionExpiredRedirect && form) {
+        showAlert('error', 'Sua sessão expirou. Faça login novamente para continuar.');
       }
 
       function translateErrorMessage(rawMessage, isSignup) {
@@ -425,11 +453,27 @@ ${tokensCss}
               return;
             }
 
-            // Sessão autenticada com sucesso
+            const accessToken = data.token || (data.session && data.session.access_token) || null; // allowlist-secret
+
+            if (currentMode === 'signup' && !accessToken && data.requires_email_confirmation) {
+              setMode('login');
+              if (passwordInput) passwordInput.value = '';
+              if (confirmPasswordInput) confirmPasswordInput.value = '';
+              showAlert(
+                'success',
+                data.message || 'Conta criada com sucesso! Confirme seu e-mail para ativar a sessão.'
+              );
+              return;
+            }
+
+            // Sessão autenticada com sucesso (sem fallback para modo demo)
             const sessionData = {
-              token: data.token || data.session?.access_token || 'session-' + Date.now(), // allowlist-secret
+              token: accessToken, // allowlist-secret
+              expires_at: (data.session && data.session.expires_at) || null,
               user: data.user || { email },
-              isDemo: false
+              session: data.session || (accessToken ? { access_token: accessToken, token_type: 'bearer' } : null), // allowlist-secret
+              isDemo: false,
+              isDemoMode: false
             };
             saveSessionStorage(sessionData);
             showAlert(

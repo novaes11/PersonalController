@@ -170,5 +170,16 @@ describe('Auth Provider API - /auth', () => {
       expect(response.statusCode).toBe(200);
       expect(response.body.status).toBe('ok');
     });
+
+    it('deve retornar 400 ao tentar cadastrar e-mail já existente', async () => {
+      const response = await request(app).post('/api/auth/signup').send({
+        email: 'usuario.duplicado@exemplo.com',
+        password: 'senhaSegura123'
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body.status).toBe('error');
+      expect(response.body.message).toContain('já cadastrado');
+    });
   });
 });

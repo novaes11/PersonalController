@@ -1,5 +1,7 @@
 const {
   buildAuthPayload,
+  buildSessionRecord,
+  loadStoredSession,
   loginUser,
   signupUser,
   logoutUser,
@@ -515,7 +517,13 @@ function createAuthViewController({
 
   function persistSession(sessionPayload) {
     if (storage && typeof storage.setItem === 'function') {
-      storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionPayload));
+      const canonical = buildSessionRecord({
+        user: sessionPayload.user || null,
+        session: sessionPayload.session || null,
+        token: sessionPayload.token || sessionPayload.session?.access_token || null, // allowlist-secret
+        isDemo: Boolean(sessionPayload.isDemo || sessionPayload.isDemoMode)
+      });
+      storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(canonical));
     }
   }
 
@@ -523,6 +531,23 @@ function createAuthViewController({
     if (storage && typeof storage.removeItem === 'function') {
       storage.removeItem(SESSION_STORAGE_KEY);
     }
+  }
+
+  function restoreSession(nowSeconds = Math.floor(Date.now() / 1000)) {
+    const restored = loadStoredSession(storage, nowSeconds);
+    if (!restored) {
+      return null;
+    }
+
+    state = {
+      ...state,
+      user: restored.user,
+      session: restored.session,
+      isDemoMode: restored.isDemo,
+      demoData: restored.isDemo ? createDemoDataset() : null,
+      errorMessage: null
+    };
+    return getState();
   }
 
   async function submit() {
@@ -562,11 +587,21 @@ function createAuthViewController({
       const action = state.mode === 'signup' ? signupUser : loginUser;
       const result = await action(validation.payload, { baseUrl, fetchImpl });
 
+      const resolvedToken = result.token || result.session?.access_token || null; // allowlist-secret
+      const resolvedSession =
+        result.session ||
+        (resolvedToken
+          ? {
+              access_token: resolvedToken, // allowlist-secret
+              token_type: 'bearer'
+            }
+          : null);
+
       state = {
         ...state,
         isSubmitting: false,
         user: result.user,
-        session: result.session,
+        session: resolvedSession,
         isDemoMode: false,
         demoData: null,
         password: '',
@@ -574,10 +609,12 @@ function createAuthViewController({
         successMessage: result.message
       };
 
-      if (result.session) {
+      if (resolvedSession) {
         persistSession({
+          token: resolvedToken, // allowlist-secret
           user: result.user,
-          session: result.session,
+          session: resolvedSession,
+          isDemo: false,
           isDemoMode: false
         });
       }
@@ -586,7 +623,13 @@ function createAuthViewController({
         onAuthenticated(getState());
       }
 
-      return { ok: true, user: result.user, session: result.session };
+      return {
+        ok: true,
+        token: resolvedToken, // allowlist-secret
+        user: result.user,
+        session: resolvedSession,
+        requires_email_confirmation: Boolean(result.requires_email_confirmation)
+      };
     } catch (err) {
       state = {
         ...state,
@@ -614,6 +657,7 @@ function createAuthViewController({
 
     persistSession({
       user: demoData.user,
+      isDemo: true,
       isDemoMode: true
     });
 
@@ -670,6 +714,7 @@ function createAuthViewController({
     getState,
     setMode,
     setField,
+    restoreSession,
     submit,
     enterDemoMode,
     logout,

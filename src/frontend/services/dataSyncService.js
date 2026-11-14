@@ -47,9 +47,19 @@ function resolveAuthSessionMode(rawSession) {
     }
   }
 
-  const token = parsed && typeof parsed.token === 'string' ? parsed.token.trim() : '';
+  const candidateToken =
+    parsed && typeof parsed.token === 'string'
+      ? parsed.token
+      : parsed && parsed.session && typeof parsed.session.access_token === 'string'
+        ? parsed.session.access_token
+        : '';
+  const token = candidateToken.trim();
   const isSimulatedToken = !token || token.startsWith('demo-token-') || token.startsWith('session-');
-  const isDemoFlag = !parsed || parsed.isDemo === true || Boolean(parsed.user && parsed.user.isDemo === true);
+  const isDemoFlag =
+    !parsed ||
+    parsed.isDemo === true ||
+    parsed.isDemoMode === true ||
+    Boolean(parsed.user && parsed.user.isDemo === true);
 
   if (isDemoFlag || isSimulatedToken) {
     return {
