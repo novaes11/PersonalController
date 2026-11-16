@@ -1,7 +1,9 @@
 const {
+  SESSION_STORAGE_KEY,
+  saveAuthSession,
+  loadAuthSession,
+  clearAuthSession,
   buildAuthPayload,
-  buildSessionRecord,
-  loadStoredSession,
   loginUser,
   signupUser,
   logoutUser,
@@ -463,19 +465,19 @@ function createAuthViewElement(React, props = {}) {
   );
 }
 
-const SESSION_STORAGE_KEY = 'pc_auth_session';
-
 /**
- * Controlador de autenticação (`/login`, `/signup`, `/logout`) e Modo Demonstração (E05.T03).
+ * Controlador de autenticação (`/login`, `/signup`, `/logout`) e Modo Demonstração (E05.T03 & AUTH-02).
  */
 function createAuthViewController({
   initialMode = 'login',
   baseUrl = '/api',
+  redirectUrl = '/dashboard',
   fetchImpl = global.fetch,
   storage = null,
   onAuthenticated,
   onDemoActivated,
-  onLoggedOut
+  onLoggedOut,
+  onRedirect
 } = {}) {
   let state = {
     mode: initialMode === 'signup' ? 'signup' : 'login',
@@ -487,8 +489,11 @@ function createAuthViewController({
     successMessage: null,
     user: null,
     session: null,
+    token: null,
     isDemoMode: false,
-    demoData: null
+    isDemo: false,
+    demoData: null,
+    redirectTo: null
   };
 
   function getState() {
@@ -516,25 +521,15 @@ function createAuthViewController({
   }
 
   function persistSession(sessionPayload) {
-    if (storage && typeof storage.setItem === 'function') {
-      const canonical = buildSessionRecord({
-        user: sessionPayload.user || null,
-        session: sessionPayload.session || null,
-        token: sessionPayload.token || sessionPayload.session?.access_token || null, // allowlist-secret
-        isDemo: Boolean(sessionPayload.isDemo || sessionPayload.isDemoMode)
-      });
-      storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(canonical));
-    }
+    return saveAuthSession(sessionPayload, storage);
   }
 
   function clearPersistedSession() {
-    if (storage && typeof storage.removeItem === 'function') {
-      storage.removeItem(SESSION_STORAGE_KEY);
-    }
+    clearAuthSession(storage);
   }
 
   function restoreSession(nowSeconds = Math.floor(Date.now() / 1000)) {
-    const restored = loadStoredSession(storage, nowSeconds);
+    const restored = loadAuthSession(storage, nowSeconds);
     if (!restored) {
       return null;
     }
@@ -543,7 +538,9 @@ function createAuthViewController({
       ...state,
       user: restored.user,
       session: restored.session,
+      token: restored.token, // allowlist-secret
       isDemoMode: restored.isDemo,
+      isDemo: restored.isDemo,
       demoData: restored.isDemo ? createDemoDataset() : null,
       errorMessage: null
     };
@@ -586,49 +583,76 @@ function createAuthViewController({
     try {
       const action = state.mode === 'signup' ? signupUser : loginUser;
       const result = await action(validation.payload, { baseUrl, fetchImpl });
-
       const resolvedToken = result.token || result.session?.access_token || null; // allowlist-secret
-      const resolvedSession =
-        result.session ||
-        (resolvedToken
-          ? {
-              access_token: resolvedToken, // allowlist-secret
-              token_type: 'bearer'
-            }
-          : null);
+
+      if (!resolvedToken) {
+        clearPersistedSession();
+        state = {
+          ...state,
+          mode: 'login',
+          isSubmitting: false,
+          user: result.user,
+          session: null,
+          token: null,
+          isDemoMode: false,
+          isDemo: false,
+          demoData: null,
+          redirectTo: null,
+          password: '',
+          confirmPassword: '',
+          successMessage:
+            result.message ||
+            'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+        };
+
+        return {
+          ok: true,
+          user: result.user,
+          session: null,
+          token: null,
+          requiresEmailConfirmation: true,
+          requires_email_confirmation: true
+        };
+      }
+
+      const persistedRecord = persistSession({
+        user: result.user,
+        session: result.session,
+        token: resolvedToken, // allowlist-secret
+        isDemo: false
+      });
 
       state = {
         ...state,
         isSubmitting: false,
-        user: result.user,
-        session: resolvedSession,
+        user: persistedRecord.user,
+        session: persistedRecord.session,
+        token: persistedRecord.token, // allowlist-secret
         isDemoMode: false,
+        isDemo: false,
         demoData: null,
+        redirectTo: redirectUrl,
         password: '',
         confirmPassword: '',
         successMessage: result.message
       };
 
-      if (resolvedSession) {
-        persistSession({
-          token: resolvedToken, // allowlist-secret
-          user: result.user,
-          session: resolvedSession,
-          isDemo: false,
-          isDemoMode: false
-        });
-      }
-
       if (typeof onAuthenticated === 'function') {
         onAuthenticated(getState());
       }
 
+      if (typeof onRedirect === 'function') {
+        onRedirect(redirectUrl, getState());
+      }
+
       return {
         ok: true,
-        token: resolvedToken, // allowlist-secret
-        user: result.user,
-        session: resolvedSession,
-        requires_email_confirmation: Boolean(result.requires_email_confirmation)
+        user: state.user,
+        session: state.session,
+        token: state.token, // allowlist-secret
+        redirectTo: redirectUrl,
+        requiresEmailConfirmation: false,
+        requires_email_confirmation: false
       };
     } catch (err) {
       state = {
@@ -645,31 +669,38 @@ function createAuthViewController({
    */
   function enterDemoMode() {
     const demoData = createDemoDataset();
+    const persistedDemo = persistSession({
+      user: demoData.user,
+      session: { token_type: 'demo', expires_at: null }, // allowlist-secret
+      isDemo: true
+    });
+
     state = {
       ...state,
       user: demoData.user,
-      session: { token_type: 'demo', expires_at: null },
+      session: persistedDemo.session,
+      token: persistedDemo.token, // allowlist-secret
       isDemoMode: true,
+      isDemo: true,
       demoData,
+      redirectTo: redirectUrl,
       errorMessage: null,
       successMessage: 'Modo Demonstração ativado com sucesso!'
     };
 
-    persistSession({
-      user: demoData.user,
-      isDemo: true,
-      isDemoMode: true
-    });
-
     if (typeof onDemoActivated === 'function') {
       onDemoActivated(demoData, getState());
+    }
+
+    if (typeof onRedirect === 'function') {
+      onRedirect(redirectUrl, getState());
     }
 
     return demoData;
   }
 
   async function logout() {
-    const token = state.session?.access_token; // allowlist-secret
+    const token = state.token || state.session?.access_token; // allowlist-secret
     if (!state.isDemoMode && token) {
       try {
         await logoutUser({ token, baseUrl, fetchImpl });
@@ -683,8 +714,11 @@ function createAuthViewController({
       ...state,
       user: null,
       session: null,
+      token: null,
       isDemoMode: false,
+      isDemo: false,
       demoData: null,
+      redirectTo: null,
       password: '',
       confirmPassword: '',
       errorMessage: null,

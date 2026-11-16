@@ -138,14 +138,16 @@ ${tokensCss}
         const existingSession = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
         if (existingSession && !isLogoutRedirect && !isSessionExpiredRedirect) {
           const parsed = JSON.parse(existingSession);
-          const resolvedToken = parsed && (parsed.token || (parsed.session && parsed.session.access_token));
+          const rawToken = parsed && (parsed.token || (parsed.session && parsed.session.access_token));
+          const hasValidJwt = typeof rawToken === 'string' && rawToken.trim().length > 0 && !rawToken.startsWith('session-');
+          const isDemoSession = Boolean(parsed && (parsed.isDemo === true || parsed.isDemoMode === true));
           const expiresAt = Number((parsed && (parsed.expires_at || (parsed.session && parsed.session.expires_at))) || 0);
           const nowSec = Math.floor(Date.now() / 1000);
-          const isExpired = expiresAt > 0 && expiresAt <= nowSec;
+          const isExpired = !isDemoSession && expiresAt > 0 && expiresAt <= nowSec;
 
           if (isExpired) {
             clearSessionStorage();
-          } else if (parsed && (resolvedToken || parsed.isDemo || parsed.isDemoMode)) {
+          } else if (hasValidJwt || isDemoSession) {
             window.location.href = '/dashboard';
             return;
           }
@@ -196,14 +198,20 @@ ${tokensCss}
           return isSignup ? 'Erro ao criar conta.' : 'Credenciais inválidas.';
         }
         const lower = String(rawMessage).toLowerCase();
-        if (lower.includes('already registered') || lower.includes('already exists')) {
+        if (lower.includes('already registered') || lower.includes('already exists') || lower.includes('já cadastrado')) {
           return 'Este endereço de e-mail já está cadastrado. Tente entrar na conta.';
         }
-        if (lower.includes('invalid login credentials')) {
-          return 'E-mail ou senha incorretos.';
+        if (lower.includes('invalid login credentials') || lower.includes('credenciais inválidas')) {
+          return 'Credenciais inválidas: e-mail ou senha incorretos.';
         }
-        if (lower.includes('email not confirmed')) {
+        if (lower.includes('email not confirmed') || lower.includes('não confirmado')) {
           return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+        }
+        if (lower.includes('rate limit') || lower.includes('muitas tentativas')) {
+          return 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
+        }
+        if (lower.includes('fetch failed') || lower.includes('failed to fetch')) {
+          return 'Falha de comunicação com o servidor de autenticação. Tente novamente em instantes.';
         }
         return rawMessage;
       }
@@ -453,25 +461,26 @@ ${tokensCss}
               return;
             }
 
-            const accessToken = data.token || (data.session && data.session.access_token) || null; // allowlist-secret
-
-            if (currentMode === 'signup' && !accessToken && data.requires_email_confirmation) {
-              setMode('login');
+            // Extração do token JWT real retornado pelo backend / Supabase Auth
+            const resolvedToken = data.token || (data.session && data.session.access_token) || null; // allowlist-secret
+            if (!resolvedToken || data.requiresEmailConfirmation || data.requires_email_confirmation) {
+              clearSessionStorage();
               if (passwordInput) passwordInput.value = '';
               if (confirmPasswordInput) confirmPasswordInput.value = '';
+              setMode('login');
               showAlert(
                 'success',
-                data.message || 'Conta criada com sucesso! Confirme seu e-mail para ativar a sessão.'
+                data.message || 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
               );
               return;
             }
 
-            // Sessão autenticada com sucesso (sem fallback para modo demo)
+            // Sessão autenticada com sucesso (JWT válido, sem fallback para modo demo)
             const sessionData = {
-              token: accessToken, // allowlist-secret
+              token: resolvedToken, // allowlist-secret
               expires_at: (data.session && data.session.expires_at) || null,
-              user: data.user || { email },
-              session: data.session || (accessToken ? { access_token: accessToken, token_type: 'bearer' } : null), // allowlist-secret
+              user: Object.assign({}, data.user || { email }, { isDemo: false }),
+              session: data.session || { access_token: resolvedToken, token_type: 'bearer' }, // allowlist-secret
               isDemo: false,
               isDemoMode: false
             };
