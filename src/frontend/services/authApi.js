@@ -1,9 +1,10 @@
 /**
- * Cliente HTTP de Frontend para Autenticação e Modo Demonstração Interativo (E05.T03).
- * Compatível com os schemas Zod estritos de `/api/auth/login`, `/api/auth/signup` e `/api/auth/logout`.
+ * Cliente HTTP de Frontend para Autenticação, Gestão de Sessão e Modo Demonstração (E05.T03 & AUTH-02).
+ * Compatível com os schemas Zod estritos de `/api/auth/login`, `/api/auth/signup`, `/api/auth/logout` e `/api/auth/me`.
  */
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SESSION_STORAGE_KEY = 'pc_auth_session';
 
 /**
  * Valida e normaliza credenciais de login/cadastro garantindo payload estrito (SEC-04).
@@ -13,9 +14,10 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function buildAuthPayload(rawInput = {}) {
   const errors = [];
   const email = rawInput.email ? String(rawInput.email).trim().toLowerCase() : '';
-  const password = rawInput.password !== undefined && rawInput.password !== null // allowlist-secret
-    ? String(rawInput.password)
-    : '';
+  const password =
+    rawInput.password !== undefined && rawInput.password !== null // allowlist-secret
+      ? String(rawInput.password)
+      : '';
 
   if (!email || !EMAIL_REGEX.test(email)) {
     errors.push({
@@ -46,6 +48,232 @@ function buildAuthPayload(rawInput = {}) {
 }
 
 /**
+ * Traduz mensagens técnicas de erro de autenticação ou rede para mensagens amigáveis em português.
+ */
+function translateAuthError(rawMessage, mode = 'login') {
+  if (!rawMessage) {
+    return mode === 'signup'
+      ? 'Falha ao criar conta. Verifique os dados informados.'
+      : 'Credenciais inválidas';
+  }
+
+  const msg = String(rawMessage).trim();
+  const lower = msg.toLowerCase();
+
+  if (
+    lower.includes('already registered') ||
+    lower.includes('already exists') ||
+    lower.includes('user_already_exists')
+  ) {
+    return 'Este endereço de e-mail já está cadastrado. Tente entrar na conta.';
+  }
+
+  if (lower.includes('invalid login credentials') || lower.includes('invalid_credentials')) {
+    return 'Credenciais inválidas: e-mail ou senha incorretos.';
+  }
+
+  if (lower.includes('email not confirmed') || lower.includes('email_not_confirmed')) {
+    return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+  }
+
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network error') ||
+    lower.includes('econnrefused')
+  ) {
+    return 'Falha de conexão com o servidor. Verifique sua internet e tente novamente.';
+  }
+
+  return msg;
+}
+
+/**
+ * Constrói um objeto canônico de sessão compatível com AuthView, renderLandingPage,
+ * renderAppPage e dataSyncService (evitando queda acidental em modo demo).
+ */
+function buildSessionRecord({ user = null, session = null, token = null, isDemo = false, isDemoMode = false } = {}) {
+  const demoFlag = Boolean(isDemo || isDemoMode || (user && user.isDemo === true));
+  const resolvedToken = demoFlag
+    ? (token || `demo-token-${Date.now()}`) // allowlist-secret
+    : (token || session?.access_token || null); // allowlist-secret
+  const expiresAt = session?.expires_at ?? null;
+
+  const normalizedUser = user
+    ? {
+        id: user.id || (demoFlag ? '00000000-0000-4000-8000-000000000001' : null),
+        email: user.email || (demoFlag ? 'demo@personalcontroller.app' : ''),
+        ...(user.created_at ? { created_at: user.created_at } : {}),
+        isDemo: demoFlag
+      }
+    : null;
+
+  const normalizedSession = demoFlag
+    ? (session || { token_type: 'demo', expires_at: null }) // allowlist-secret
+    : (session
+        ? {
+            ...session,
+            access_token: session.access_token || resolvedToken, // allowlist-secret
+            expires_at: expiresAt,
+            token_type: session.token_type || 'bearer' // allowlist-secret
+          }
+        : (resolvedToken
+            ? {
+                access_token: resolvedToken, // allowlist-secret
+                expires_at: expiresAt,
+                token_type: 'bearer' // allowlist-secret
+              }
+            : null));
+
+  return {
+    token: resolvedToken, // allowlist-secret
+    expires_at: expiresAt,
+    isDemo: demoFlag,
+    isDemoMode: demoFlag,
+    user: normalizedUser,
+    session: normalizedSession
+  };
+}
+
+/**
+ * Verifica se o registro de sessão expirou com base no timestamp Unix `expires_at` (em segundos).
+ * @param {object|null} sessionRecord
+ * @param {number} [nowSeconds]
+ * @returns {boolean}
+ */
+function isSessionExpired(sessionRecord, nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (!sessionRecord || typeof sessionRecord !== 'object') return true;
+  if (sessionRecord.isDemo === true || sessionRecord.isDemoMode === true) return false;
+
+  const expiresAt = Number(sessionRecord.expires_at ?? sessionRecord.session?.expires_at ?? 0);
+  if (expiresAt > 0 && expiresAt <= nowSeconds) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Persiste a sessão autenticada no storage informado (ou localStorage/sessionStorage).
+ */
+function saveAuthSession(sessionInput, customStorage = null) {
+  const canonical =
+    sessionInput && ('isDemo' in sessionInput && 'token' in sessionInput && 'session' in sessionInput)
+      ? buildSessionRecord(sessionInput)
+      : buildSessionRecord({
+          user: sessionInput?.user || null,
+          session: sessionInput?.session || null,
+          token: sessionInput?.token || sessionInput?.session?.access_token || null, // allowlist-secret
+          isDemo: Boolean(sessionInput?.isDemo || sessionInput?.isDemoMode)
+        });
+
+  const serialized = JSON.stringify(canonical);
+
+  if (customStorage && typeof customStorage.setItem === 'function') {
+    customStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    return canonical;
+  }
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage && typeof globalThis.localStorage.setItem === 'function') {
+      globalThis.localStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.sessionStorage && typeof globalThis.sessionStorage.setItem === 'function') {
+      globalThis.sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
+    }
+  } catch (_) {}
+
+  return canonical;
+}
+
+/**
+ * Remove a sessão armazenada do cliente.
+ */
+function clearAuthSession(customStorage = null) {
+  if (customStorage && typeof customStorage.removeItem === 'function') {
+    customStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage && typeof globalThis.localStorage.removeItem === 'function') {
+      globalThis.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.sessionStorage && typeof globalThis.sessionStorage.removeItem === 'function') {
+      globalThis.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+}
+
+/**
+ * Carrega e valida a sessão salva no cliente. Caso esteja expirada ou corrompida, limpa automaticamente.
+ */
+function loadAuthSession(customStorage = null, nowSeconds = Math.floor(Date.now() / 1000)) {
+  let raw = null;
+
+  if (customStorage && typeof customStorage.getItem === 'function') {
+    raw = customStorage.getItem(SESSION_STORAGE_KEY);
+  } else {
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.localStorage && typeof globalThis.localStorage.getItem === 'function') {
+        raw = globalThis.localStorage.getItem(SESSION_STORAGE_KEY);
+      }
+    } catch (_) {}
+
+    if (!raw) {
+      try {
+        if (typeof globalThis !== 'undefined' && globalThis.sessionStorage && typeof globalThis.sessionStorage.getItem === 'function') {
+          raw = globalThis.sessionStorage.getItem(SESSION_STORAGE_KEY);
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!raw) return null;
+
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') {
+      clearAuthSession(customStorage);
+      return null;
+    }
+
+    if (isSessionExpired(parsed, nowSeconds)) {
+      clearAuthSession(customStorage);
+      return null;
+    }
+
+    const isDemo = Boolean(parsed.isDemo === true || parsed.isDemoMode === true || (parsed.user && parsed.user.isDemo === true));
+    const token = parsed.token || parsed.session?.access_token || null; // allowlist-secret
+
+    if (!isDemo && (!token || String(token).startsWith('session-'))) {
+      clearAuthSession(customStorage);
+      return null;
+    }
+
+    return buildSessionRecord({
+      user: parsed.user || null,
+      session: parsed.session || null,
+      token,
+      isDemo
+    });
+  } catch (_) {
+    clearAuthSession(customStorage);
+    return null;
+  }
+}
+
+const saveStoredSession = saveAuthSession;
+const loadStoredSession = loadAuthSession;
+const clearStoredSession = clearAuthSession;
+
+/**
  * Realiza autenticação via POST /api/auth/login.
  */
 async function loginUser(credentials, options = {}) {
@@ -59,27 +287,52 @@ async function loginUser(credentials, options = {}) {
     throw err;
   }
 
-  const response = await fetchImpl(`${baseUrl}/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    body: JSON.stringify(validation.payload)
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(validation.payload)
+    });
+  } catch (networkErr) {
+    const err = new Error('Falha de conexão com o servidor. Verifique sua internet e tente novamente.');
+    err.code = 'NETWORK_ERROR';
+    err.cause = networkErr;
+    throw err;
+  }
 
-  const body = await response.json();
+  let body = {};
+  try {
+    body = await response.json();
+  } catch (_) {
+    body = {};
+  }
 
   if (!response.ok || body.status === 'error') {
-    const err = new Error(body.message || `Falha na autenticação (HTTP ${response.status})`);
+    const firstFieldError = Array.isArray(body.errors) && body.errors[0]?.message;
+    const rawMsg = firstFieldError || body.message || `Falha na autenticação (HTTP ${response.status})`;
+    const err = new Error(translateAuthError(rawMsg, 'login'));
     err.status = response.status;
     err.errors = body.errors || [];
     throw err;
   }
 
+  const resolvedToken = body.token || body.session?.access_token || null; // allowlist-secret
+  const session = body.session
+    ? {
+        ...body.session,
+        access_token: body.session.access_token || resolvedToken, // allowlist-secret
+        token_type: body.session.token_type || 'bearer' // allowlist-secret
+      }
+    : (resolvedToken ? { access_token: resolvedToken, token_type: 'bearer', expires_at: null } : null); // allowlist-secret
+
   return {
+    token: resolvedToken, // allowlist-secret
     user: body.user || null,
-    session: body.session || null,
+    session,
     message: body.message || 'Autenticado com sucesso'
   };
 }
@@ -98,29 +351,102 @@ async function signupUser(credentials, options = {}) {
     throw err;
   }
 
-  const response = await fetchImpl(`${baseUrl}/auth/signup`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    body: JSON.stringify(validation.payload)
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(validation.payload)
+    });
+  } catch (networkErr) {
+    const err = new Error('Falha de conexão com o servidor. Verifique sua internet e tente novamente.');
+    err.code = 'NETWORK_ERROR';
+    err.cause = networkErr;
+    throw err;
+  }
 
-  const body = await response.json();
+  let body = {};
+  try {
+    body = await response.json();
+  } catch (_) {
+    body = {};
+  }
 
   if (!response.ok || body.status === 'error') {
-    const err = new Error(body.message || `Falha ao criar conta (HTTP ${response.status})`);
+    const firstFieldError = Array.isArray(body.errors) && body.errors[0]?.message;
+    const rawMsg = firstFieldError || body.message || `Falha ao criar conta (HTTP ${response.status})`;
+    const err = new Error(translateAuthError(rawMsg, 'signup'));
     err.status = response.status;
     err.errors = body.errors || [];
     throw err;
   }
 
+  const resolvedToken = body.token || body.session?.access_token || null; // allowlist-secret
+  const session = body.session
+    ? {
+        ...body.session,
+        access_token: body.session.access_token || resolvedToken, // allowlist-secret
+        token_type: body.session.token_type || 'bearer' // allowlist-secret
+      }
+    : (resolvedToken ? { access_token: resolvedToken, token_type: 'bearer', expires_at: null } : null); // allowlist-secret
+  const requiresEmailConfirmation = Boolean(
+    body.requiresEmailConfirmation || body.requires_email_confirmation || !resolvedToken
+  );
+
   return {
+    token: resolvedToken, // allowlist-secret
+    requiresEmailConfirmation,
+    requires_email_confirmation: requiresEmailConfirmation,
     user: body.user || null,
-    session: body.session || null,
-    message: body.message || 'Usuário cadastrado com sucesso'
+    session,
+    message:
+      body.message ||
+      (requiresEmailConfirmation
+        ? 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+        : 'Usuário cadastrado com sucesso')
   };
+}
+
+/**
+ * Consulta o perfil do usuário autenticado via GET /api/auth/me.
+ */
+async function fetchCurrentUser(options = {}) {
+  const { token, baseUrl = '/api', fetchImpl = global.fetch } = options;
+
+  if (!token) {
+    const err = new Error('Token de autenticação ausente.');
+    err.status = 401;
+    throw err;
+  }
+
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/auth/me`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    });
+  } catch (networkErr) {
+    const err = new Error('Falha de conexão ao validar sessão.');
+    err.code = 'NETWORK_ERROR';
+    err.cause = networkErr;
+    throw err;
+  }
+
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok || body.status === 'error') {
+    const err = new Error(body.message || `Sessão inválida (HTTP ${response.status})`);
+    err.status = response.status;
+    throw err;
+  }
+
+  return body.user || null;
 }
 
 /**
@@ -297,9 +623,20 @@ function createDemoDataset() {
 }
 
 module.exports = {
+  SESSION_STORAGE_KEY,
+  translateAuthError,
   buildAuthPayload,
+  buildSessionRecord,
+  isSessionExpired,
+  saveAuthSession,
+  loadAuthSession,
+  clearAuthSession,
+  saveStoredSession,
+  loadStoredSession,
+  clearStoredSession,
   loginUser,
   signupUser,
+  fetchCurrentUser,
   logoutUser,
   createDemoDataset
 };

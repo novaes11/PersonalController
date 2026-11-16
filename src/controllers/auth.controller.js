@@ -1,4 +1,5 @@
 const { getSupabaseClient, getSupabaseAdminClient } = require('../lib/supabase');
+const { syncUserProfile, resolveProfileDbClient } = require('../services/supabase.service');
 const { signupSchema, loginSchema, sanitizeUser } = require('../schemas/auth.schema');
 
 function formatZodIssues(issues) {
@@ -13,19 +14,52 @@ function formatZodIssues(issues) {
   });
 }
 
-function resolveProfileDbClient(fallbackClient, accessToken) {
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY && typeof getSupabaseAdminClient === 'function') {
-    return getSupabaseAdminClient();
+function formatAuthErrorMessage(rawMessage, mode = 'login') {
+  if (!rawMessage) {
+    return mode === 'signup'
+      ? 'Não foi possível concluir o cadastro.'
+      : 'Credenciais inválidas';
   }
-  if (accessToken && typeof getSupabaseClient === 'function') {
-    return getSupabaseClient({
-      headers: {
-        authorization: `Bearer ${accessToken}`
-      }
-    });
+
+  const msg = String(rawMessage).trim();
+  const lower = msg.toLowerCase();
+
+  if (
+    lower.includes('already registered') ||
+    lower.includes('already exists') ||
+    lower.includes('user_already_exists')
+  ) {
+    return 'Usuário já cadastrado com este endereço de e-mail.';
   }
-  return fallbackClient;
+
+  if (lower.includes('já cadastrado') || lower.includes('já está cadastrado')) {
+    return msg;
+  }
+
+  if (
+    lower.includes('invalid login credentials') ||
+    lower.includes('invalid_credentials') ||
+    lower.includes('credenciais inválidas')
+  ) {
+    return 'Credenciais inválidas';
+  }
+
+  if (lower.includes('email not confirmed') || lower.includes('email_not_confirmed')) {
+    return 'E-mail ainda não confirmado. Verifique sua caixa de entrada para ativar a conta.';
+  }
+
+  if (lower.includes('rate limit') || lower.includes('too many requests')) {
+    return 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
+  }
+
+  if (lower.includes('fetch failed') || lower.includes('failed to fetch') || lower.includes('enotfound')) {
+    return 'Serviço de autenticação temporariamente indisponível. Verifique a configuração do Supabase.';
+  }
+
+  return msg;
 }
+
+const normalizeAuthErrorMessage = formatAuthErrorMessage;
 
 async function signup(req, res) {
   try {
@@ -50,33 +84,67 @@ async function signup(req, res) {
     if (error) {
       return res.status(400).json({
         status: 'error',
-        message: error.message
+        message: formatAuthErrorMessage(error.message, 'signup')
       });
     }
 
-    // Se o usuário foi criado, garante registro do perfil na tabela public.users
-    if (data.user) {
-      try {
-        const dbClient = resolveProfileDbClient(supabase, data.session?.access_token);
-        if (dbClient && typeof dbClient.from === 'function') {
-          await dbClient.from('users').upsert({
-            id: data.user.id,
-            email: data.user.email
-          }, { onConflict: 'id' });
-        }
-      } catch (profileErr) {
-        // Não bloqueia conclusão do cadastro caso confirmação de e-mail esteja pendente
-      }
+    // Supabase Auth retorna identities vazio quando o e-mail já existe e confirmação de e-mail está ativa
+    if (Array.isArray(data?.user?.identities) && data.user.identities.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Usuário já cadastrado com este endereço de e-mail.'
+      });
     }
+
+    let activeSession = data?.session || null;
+
+    // Caso o signUp não retorne sessão imediata, tenta confirmar (se service_role existir) e autenticar para obter o JWT
+    if (!activeSession && data?.user) {
+      try {
+        if (process.env.SUPABASE_SERVICE_ROLE_KEY && typeof getSupabaseAdminClient === 'function') {
+          const adminClient = getSupabaseAdminClient();
+          if (adminClient?.auth?.admin && typeof adminClient.auth.admin.updateUserById === 'function') {
+            await adminClient.auth.admin.updateUserById(data.user.id, { email_confirm: true });
+          }
+        }
+      } catch (_) {}
+
+      try {
+        if (typeof supabase.auth.signInWithPassword === 'function') {
+          const signInRes = await supabase.auth.signInWithPassword({ email, password });
+          if (!signInRes?.error && signInRes?.data?.session?.access_token) {
+            activeSession = signInRes.data.session;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Se o usuário foi criado, garante registro do perfil na tabela public.users
+    if (data?.user) {
+      await syncUserProfile(data.user, activeSession?.access_token, supabase);
+    }
+
+    const sessionPayload = activeSession?.access_token
+      ? {
+          access_token: activeSession.access_token, // allowlist-secret
+          refresh_token: activeSession.refresh_token || null, // allowlist-secret
+          expires_at: activeSession.expires_at ?? null,
+          token_type: activeSession.token_type || 'bearer' // allowlist-secret
+        }
+      : null;
+
+    const requiresEmailConfirmation = !sessionPayload;
 
     return res.status(201).json({
       status: 'ok',
-      message: 'Usuário cadastrado com sucesso',
-      user: sanitizeUser(data.user),
-      session: data.session ? {
-        access_token: data.session.access_token, // allowlist-secret
-        expires_at: data.session.expires_at
-      } : null
+      message: requiresEmailConfirmation
+        ? 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+        : 'Usuário cadastrado com sucesso',
+      token: sessionPayload ? sessionPayload.access_token : null, // allowlist-secret
+      requiresEmailConfirmation,
+      requires_email_confirmation: requiresEmailConfirmation,
+      user: sanitizeUser(data?.user),
+      session: sessionPayload
     });
   } catch (err) {
     return res.status(500).json({
@@ -106,35 +174,31 @@ async function login(req, res) {
       password
     });
 
-    if (error) {
+    if (error || !data?.session?.access_token) {
       return res.status(401).json({
         status: 'error',
-        message: 'Credenciais inválidas'
+        message: formatAuthErrorMessage(error?.message, 'login')
       });
     }
 
     // Garante sincronização do perfil em public.users após login autenticado
-    if (data.user && data.session?.access_token) {
-      try {
-        const dbClient = resolveProfileDbClient(supabase, data.session.access_token);
-        if (dbClient && typeof dbClient.from === 'function') {
-          await dbClient.from('users').upsert({
-            id: data.user.id,
-            email: data.user.email
-          }, { onConflict: 'id' });
-        }
-      } catch (profileErr) {}
+    if (data?.user && data?.session?.access_token) {
+      await syncUserProfile(data.user, data.session.access_token, supabase);
     }
+
+    const sessionPayload = {
+      access_token: data.session.access_token, // allowlist-secret
+      refresh_token: data.session.refresh_token || null, // allowlist-secret
+      expires_at: data.session.expires_at ?? null,
+      token_type: data.session.token_type || 'bearer' // allowlist-secret
+    };
 
     return res.status(200).json({
       status: 'ok',
       message: 'Autenticado com sucesso',
+      token: sessionPayload.access_token, // allowlist-secret
       user: sanitizeUser(data.user),
-      session: {
-        access_token: data.session?.access_token, // allowlist-secret
-        expires_at: data.session?.expires_at,
-        token_type: data.session?.token_type || 'bearer'
-      }
+      session: sessionPayload
     });
   } catch (err) {
     return res.status(500).json({
@@ -176,6 +240,9 @@ async function getMe(req, res) {
 }
 
 module.exports = {
+  formatAuthErrorMessage,
+  normalizeAuthErrorMessage,
+  resolveProfileDbClient,
   signup,
   login,
   logout,

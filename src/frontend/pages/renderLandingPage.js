@@ -116,12 +116,38 @@ ${tokensCss}
         } catch (err) {}
       }
 
-      // Auto-redirecionamento se já houver sessão ativa salva
+      function clearSessionStorage() {
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+        try {
+          sessionStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+      }
+
+      const searchQuery = window.location.search || '';
+      const isLogoutRedirect = searchQuery.includes('logout=true');
+      const isSessionExpiredRedirect = searchQuery.includes('session_expired=true');
+
+      if (isLogoutRedirect || isSessionExpiredRedirect) {
+        clearSessionStorage();
+      }
+
+      // Auto-redirecionamento se já houver sessão ativa e não expirada salva
       try {
         const existingSession = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
-        if (existingSession && !window.location.search.includes('logout=true')) {
+        if (existingSession && !isLogoutRedirect && !isSessionExpiredRedirect) {
           const parsed = JSON.parse(existingSession);
-          if (parsed && (parsed.token || parsed.isDemo)) {
+          const rawToken = parsed && (parsed.token || (parsed.session && parsed.session.access_token));
+          const hasValidJwt = typeof rawToken === 'string' && rawToken.trim().length > 0 && !rawToken.startsWith('session-');
+          const isDemoSession = Boolean(parsed && (parsed.isDemo === true || parsed.isDemoMode === true));
+          const expiresAt = Number((parsed && (parsed.expires_at || (parsed.session && parsed.session.expires_at))) || 0);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const isExpired = !isDemoSession && expiresAt > 0 && expiresAt <= nowSec;
+
+          if (isExpired) {
+            clearSessionStorage();
+          } else if (hasValidJwt || isDemoSession) {
             window.location.href = '/dashboard';
             return;
           }
@@ -163,19 +189,29 @@ ${tokensCss}
           .forEach(el => el.remove());
       }
 
+      if (isSessionExpiredRedirect && form) {
+        showAlert('error', 'Sua sessão expirou. Faça login novamente para continuar.');
+      }
+
       function translateErrorMessage(rawMessage, isSignup) {
         if (!rawMessage) {
           return isSignup ? 'Erro ao criar conta.' : 'Credenciais inválidas.';
         }
         const lower = String(rawMessage).toLowerCase();
-        if (lower.includes('already registered') || lower.includes('already exists')) {
+        if (lower.includes('already registered') || lower.includes('already exists') || lower.includes('já cadastrado')) {
           return 'Este endereço de e-mail já está cadastrado. Tente entrar na conta.';
         }
-        if (lower.includes('invalid login credentials')) {
-          return 'E-mail ou senha incorretos.';
+        if (lower.includes('invalid login credentials') || lower.includes('credenciais inválidas')) {
+          return 'Credenciais inválidas: e-mail ou senha incorretos.';
         }
-        if (lower.includes('email not confirmed')) {
+        if (lower.includes('email not confirmed') || lower.includes('não confirmado')) {
           return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+        }
+        if (lower.includes('rate limit') || lower.includes('muitas tentativas')) {
+          return 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
+        }
+        if (lower.includes('fetch failed') || lower.includes('failed to fetch')) {
+          return 'Falha de comunicação com o servidor de autenticação. Tente novamente em instantes.';
         }
         return rawMessage;
       }
@@ -425,11 +461,28 @@ ${tokensCss}
               return;
             }
 
-            // Sessão autenticada com sucesso
+            // Extração do token JWT real retornado pelo backend / Supabase Auth
+            const resolvedToken = data.token || (data.session && data.session.access_token) || null; // allowlist-secret
+            if (!resolvedToken || data.requiresEmailConfirmation || data.requires_email_confirmation) {
+              clearSessionStorage();
+              if (passwordInput) passwordInput.value = '';
+              if (confirmPasswordInput) confirmPasswordInput.value = '';
+              setMode('login');
+              showAlert(
+                'success',
+                data.message || 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+              );
+              return;
+            }
+
+            // Sessão autenticada com sucesso (JWT válido, sem fallback para modo demo)
             const sessionData = {
-              token: data.token || data.session?.access_token || 'session-' + Date.now(), // allowlist-secret
-              user: data.user || { email },
-              isDemo: false
+              token: resolvedToken, // allowlist-secret
+              expires_at: (data.session && data.session.expires_at) || null,
+              user: Object.assign({}, data.user || { email }, { isDemo: false }),
+              session: data.session || { access_token: resolvedToken, token_type: 'bearer' }, // allowlist-secret
+              isDemo: false,
+              isDemoMode: false
             };
             saveSessionStorage(sessionData);
             showAlert(
