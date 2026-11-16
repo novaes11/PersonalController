@@ -49,7 +49,7 @@ describe('E05.T03 & AUTH-02 — Tela de Autenticação (/login, /signup), Fluxo 
     });
   });
 
-  test('2. Renderiza layout Mobile-First de coluna única (w-full max-w-md mx-auto px-4) com autocomplete para gerenciadores de senha e botão Modo Demo', () => {
+  test('2. Renderiza layout Mobile-First de coluna única (w-full max-w-md mx-auto px-4) com cabeçalho contextual (UI-01) e credenciais de demonstração sem botão 1 clique (AUTH-03)', () => {
     const loginHtml = renderAuthViewMarkup({
       mode: 'login',
       email: 'joao@personalcontroller.app'
@@ -59,17 +59,29 @@ describe('E05.T03 & AUTH-02 — Tela de Autenticação (/login, /signup), Fluxo 
     expect(loginHtml).toContain('w-full max-w-md mx-auto px-4');
     expect(loginHtml).toContain('autocomplete="email"');
     expect(loginHtml).toContain('autocomplete="current-password"');
-    expect(loginHtml).toContain('data-testid="demo-mode-btn"');
-    expect(loginHtml).toContain('Entrar no Modo Demonstração (1 Clique)');
+    expect(loginHtml).toContain('data-testid="auth-heading-title"');
+    expect(loginHtml).toContain('Acesse sua conta');
+    expect(loginHtml).toContain('Informe suas credenciais para continuar');
+    expect(loginHtml).not.toContain('data-testid="auth-mode-login"');
+    expect(loginHtml).not.toContain('data-testid="auth-mode-signup"');
+    expect(loginHtml).not.toContain('data-testid="demo-mode-btn"');
+    expect(loginHtml).not.toContain('Entrar no Modo Demonstração (1 Clique)');
+    expect(loginHtml).toContain('data-testid="demo-credentials-card"');
+    expect(loginHtml).toContain('data-testid="fill-demo-credentials-btn"');
+    expect(loginHtml).toContain('demo@personalcontroller.app');
+    expect(loginHtml).toContain('Demo@123456'); // allowlist-secret
 
     const signupHtml = renderAuthViewMarkup({
       mode: 'signup',
       errorMessage: 'E-mail já cadastrado'
     });
     expect(signupHtml).toContain('data-auth-mode="signup"');
+    expect(signupHtml).toContain('Crie sua conta');
+    expect(signupHtml).toContain('Comece a controlar suas finanças hoje');
     expect(signupHtml).toContain('autocomplete="new-password"');
     expect(signupHtml).toContain('data-testid="auth-error-alert"');
     expect(signupHtml).toContain('E-mail já cadastrado');
+    expect(signupHtml).not.toContain('data-testid="auth-mode-signup"');
   });
 
   test('3. Integra fluxo completo de Login, Signup, erro de credenciais (401), transição para modo autenticado e Logout no controlador', async () => {
@@ -183,19 +195,55 @@ describe('E05.T03 & AUTH-02 — Tela de Autenticação (/login, /signup), Fluxo 
     });
   });
 
-  test('4. Ativa o Modo Demonstração com 1 Clique populando categorias, transações e carteira B3/FII/Cripto', () => {
+  test('4. AUTH-03: Autentica o Modo Demonstração via credenciais oficiais (demo@personalcontroller.app / Demo@123456) populando categorias, transações e carteira B3/FII/Cripto', async () => {
+    const storageMap = new Map();
+    const mockStorage = {
+      getItem: jest.fn(k => storageMap.get(k) || null),
+      setItem: jest.fn((k, v) => storageMap.set(k, v)),
+      removeItem: jest.fn(k => storageMap.delete(k))
+    };
+
+    const mockFetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'ok',
+        message: 'Acesso de demonstração autenticado com sucesso',
+        isDemo: true,
+        user: { id: '00000000-0000-4000-8000-000000000001', email: 'demo@personalcontroller.app', isDemo: true },
+        token: 'jwt-demo-authenticated', // allowlist-secret
+        session: { access_token: 'jwt-demo-authenticated', expires_at: 9999999999, token_type: 'bearer' } // allowlist-secret
+      })
+    });
+
     const onDemoActivated = jest.fn();
-    const controller = createAuthViewController({ onDemoActivated });
+    const onRedirect = jest.fn();
+    const controller = createAuthViewController({
+      fetchImpl: mockFetch,
+      storage: mockStorage,
+      onDemoActivated,
+      onRedirect
+    });
 
-    const demoData = controller.enterDemoMode();
+    const filledState = controller.fillDemoCredentials();
+    expect(filledState.email).toBe('demo@personalcontroller.app');
+    expect(filledState.password).toBe('Demo@123456'); // allowlist-secret
 
+    const demoLoginRes = await controller.submit();
+    expect(demoLoginRes.ok).toBe(true);
+    expect(demoLoginRes.isDemo).toBe(true);
     expect(controller.getState().isDemoMode).toBe(true);
     expect(controller.getState().user.isDemo).toBe(true);
-    expect(demoData.categories.length).toBeGreaterThanOrEqual(4);
-    expect(demoData.transactions.length).toBeGreaterThanOrEqual(4);
-    expect(demoData.portfolio.positions_count).toBe(4);
-    expect(demoData.portfolio.total_portfolio_value).toBeGreaterThan(0);
-    expect(onDemoActivated).toHaveBeenCalledWith(demoData, expect.objectContaining({ isDemoMode: true }));
+    expect(demoLoginRes.demoData.categories.length).toBeGreaterThanOrEqual(4);
+    expect(demoLoginRes.demoData.transactions.length).toBeGreaterThanOrEqual(4);
+    expect(demoLoginRes.demoData.portfolio.positions_count).toBe(4);
+    expect(demoLoginRes.demoData.portfolio.total_portfolio_value).toBeGreaterThan(0);
+    expect(onDemoActivated).toHaveBeenCalledWith(
+      demoLoginRes.demoData,
+      expect.objectContaining({ isDemoMode: true, isDemo: true })
+    );
+    expect(onRedirect).toHaveBeenCalledWith('/dashboard', expect.objectContaining({ isDemo: true }));
+    expect(resolveAuthSessionMode(storageMap.get(SESSION_STORAGE_KEY)).mode).toBe('demo');
   });
 
   test('5. Cria árvore React isomórfica via createAuthViewElement e valida serviços diretos loginUser/signupUser/logoutUser', async () => {

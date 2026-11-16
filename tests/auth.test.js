@@ -219,6 +219,27 @@ describe('Auth Provider API - /auth (AUTH-02)', () => {
       expect(response.body.status).toBe('error');
       expect(response.body.message).toContain('E-mail ainda não confirmado');
     });
+
+    it('deve autenticar conta de demonstração (AUTH-03: demo@personalcontroller.app / Demo@123456) com isDemo=true e rejeitar senha incorreta com 401', async () => {
+      const demoRes = await request(app).post('/auth/login').send({
+        email: 'demo@personalcontroller.app',
+        password: 'Demo@123456' // allowlist-secret
+      });
+
+      expect(demoRes.statusCode).toBe(200);
+      expect(demoRes.body.status).toBe('ok');
+      expect(demoRes.body.isDemo).toBe(true);
+      expect(demoRes.body.user.email).toBe('demo@personalcontroller.app');
+      expect(demoRes.body.user.isDemo).toBe(true);
+
+      const wrongPassRes = await request(app).post('/auth/login').send({
+        email: 'demo@personalcontroller.app',
+        password: 'senha_errada' // allowlist-secret
+      });
+
+      expect(wrongPassRes.statusCode).toBe(401);
+      expect(wrongPassRes.body.status).toBe('error');
+    });
   });
 
   describe('GET /auth/me (Protected Route)', () => {
