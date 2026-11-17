@@ -159,10 +159,11 @@ ${tokensCss}
       let currentMode = '${mode}';
       const form = document.querySelector('[data-testid="auth-form"]');
       const authView = document.querySelector('[data-testid="auth-view"]');
-      const loginTab = document.querySelector('[data-testid="auth-mode-login"]');
-      const signupTab = document.querySelector('[data-testid="auth-mode-signup"]');
+      const headingTitleEl = document.getElementById('auth-heading-title');
+      const headingSubtitleEl = document.getElementById('auth-heading-subtitle');
+      const demoCredentialsCard = document.getElementById('demo-credentials-card');
+      const fillDemoBtn = document.querySelector('[data-testid="fill-demo-credentials-btn"]');
       const submitBtn = document.querySelector('[data-testid="auth-submit-btn"]');
-      const demoBtn = document.querySelector('[data-testid="demo-mode-btn"]');
       const emailInput = document.querySelector('[data-testid="auth-email-input"]');
       const passwordInput = document.querySelector('[data-testid="auth-password-input"]'); // allowlist-secret
       const confirmContainer = document.getElementById('confirm-password-container');
@@ -271,18 +272,24 @@ ${tokensCss}
         const isSignup = newMode === 'signup';
         clearAlerts();
 
-        if (loginTab) {
-          loginTab.setAttribute('aria-selected', !isSignup ? 'true' : 'false');
-          loginTab.className = !isSignup
-            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all bg-indigo-600 text-white shadow-sm'
-            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        if (headingTitleEl) {
+          headingTitleEl.textContent = isSignup ? 'Crie sua conta' : 'Acesse sua conta';
         }
 
-        if (signupTab) {
-          signupTab.setAttribute('aria-selected', isSignup ? 'true' : 'false');
-          signupTab.className = isSignup
-            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all bg-indigo-600 text-white shadow-sm'
-            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        if (headingSubtitleEl) {
+          headingSubtitleEl.textContent = isSignup
+            ? 'Comece a controlar suas finanças hoje'
+            : 'Informe suas credenciais para continuar';
+        }
+
+        if (demoCredentialsCard) {
+          if (isSignup) {
+            demoCredentialsCard.classList.remove('block');
+            demoCredentialsCard.classList.add('hidden');
+          } else {
+            demoCredentialsCard.classList.remove('hidden');
+            demoCredentialsCard.classList.add('block');
+          }
         }
 
         if (submitBtn) {
@@ -332,8 +339,6 @@ ${tokensCss}
         }
       }
 
-      if (loginTab) loginTab.addEventListener('click', () => setMode('login'));
-      if (signupTab) signupTab.addEventListener('click', () => setMode('signup'));
       if (authFooterToggleBtn) {
         authFooterToggleBtn.addEventListener('click', () => {
           setMode(currentMode === 'signup' ? 'login' : 'signup');
@@ -363,23 +368,19 @@ ${tokensCss}
         });
       });
 
-      // Modo Demonstração (1 Clique)
-      if (demoBtn) {
-        demoBtn.addEventListener('click', () => {
-          const demoSession = {
-            isDemo: true,
-            user: {
-              email: 'demo@personalcontroller.app',
-              name: 'Investidor Demo',
-              isDemo: true
-            },
-            token: 'demo-token-' + Date.now() // allowlist-secret
-          };
-          saveSessionStorage(demoSession);
-          showAlert('success', 'Acesso ao Modo Demonstração concedido! Redirecionando...');
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 300);
+      // Preenchimento rápido das credenciais oficiais de demonstração (AUTH-03)
+      if (fillDemoBtn) {
+        fillDemoBtn.addEventListener('click', () => {
+          if (currentMode !== 'login') {
+            setMode('login');
+          }
+          if (emailInput) emailInput.value = 'demo@personalcontroller.app';
+          if (passwordInput) {
+            passwordInput.value = 'Demo@123456'; // allowlist-secret
+            passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          showAlert('success', 'Credenciais de demonstração preenchidas. Clique em "Entrar na Conta" para acessar.');
+          if (submitBtn) submitBtn.focus();
         });
       }
 
@@ -475,21 +476,30 @@ ${tokensCss}
               return;
             }
 
-            // Sessão autenticada com sucesso (JWT válido, sem fallback para modo demo)
+            const isDemoAccount = Boolean(
+              currentMode === 'login' &&
+                (data.isDemo === true ||
+                  (data.user && data.user.isDemo === true) ||
+                  email === 'demo@personalcontroller.app')
+            );
+
+            // Sessão autenticada com sucesso (JWT válido; ativa modo demo apenas se autenticado com a conta demo oficial)
             const sessionData = {
               token: resolvedToken, // allowlist-secret
               expires_at: (data.session && data.session.expires_at) || null,
-              user: Object.assign({}, data.user || { email }, { isDemo: false }),
+              user: Object.assign({}, data.user || { email }, { isDemo: isDemoAccount }),
               session: data.session || { access_token: resolvedToken, token_type: 'bearer' }, // allowlist-secret
-              isDemo: false,
-              isDemoMode: false
+              isDemo: isDemoAccount,
+              isDemoMode: isDemoAccount
             };
             saveSessionStorage(sessionData);
             showAlert(
               'success',
               currentMode === 'signup'
                 ? 'Conta criada com sucesso! Redirecionando para o painel...'
-                : 'Autenticação realizada com sucesso! Redirecionando...'
+                : isDemoAccount
+                  ? 'Acesso de demonstração autenticado! Redirecionando para o painel...'
+                  : 'Autenticação realizada com sucesso! Redirecionando...'
             );
             setTimeout(() => {
               window.location.href = '/dashboard';

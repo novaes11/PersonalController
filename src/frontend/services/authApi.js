@@ -5,6 +5,10 @@
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SESSION_STORAGE_KEY = 'pc_auth_session';
+const DEMO_CREDENTIALS = Object.freeze({
+  email: 'demo@personalcontroller.app',
+  password: 'Demo@123456' // allowlist-secret
+});
 
 /**
  * Valida e normaliza credenciais de login/cadastro garantindo payload estrito (SEC-04).
@@ -320,6 +324,11 @@ async function loginUser(credentials, options = {}) {
     throw err;
   }
 
+  const isDemo = Boolean(
+    body.isDemo === true ||
+      body.user?.isDemo === true ||
+      validation.payload.email === DEMO_CREDENTIALS.email
+  );
   const resolvedToken = body.token || body.session?.access_token || null; // allowlist-secret
   const session = body.session
     ? {
@@ -331,7 +340,8 @@ async function loginUser(credentials, options = {}) {
 
   return {
     token: resolvedToken, // allowlist-secret
-    user: body.user || null,
+    isDemo,
+    user: body.user ? (isDemo ? { ...body.user, isDemo: true } : body.user) : null,
     session,
     message: body.message || 'Autenticado com sucesso'
   };
@@ -624,6 +634,7 @@ function createDemoDataset() {
 
 module.exports = {
   SESSION_STORAGE_KEY,
+  DEMO_CREDENTIALS,
   translateAuthError,
   buildAuthPayload,
   buildSessionRecord,

@@ -3,21 +3,34 @@ const app = require('../server');
 const { renderLandingPage } = require('../src/frontend/pages/renderLandingPage');
 
 describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /signup) e Root Deploy', () => {
-  test('1. renderLandingPage() gera documento HTML5 com doctype, tokens de design e markup de login', () => {
+  test('1. renderLandingPage() gera documento HTML5 sem abas ambíguas no topo (UI-01) e sem botão Demo 1 clique (AUTH-03)', () => {
     const html = renderLandingPage({ mode: 'login' });
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<html lang="pt-BR" data-theme="dark">');
     expect(html).toContain('data-testid="auth-view"');
     expect(html).toContain('data-auth-mode="login"');
-    expect(html).toContain('data-testid="demo-mode-btn"');
-    expect(html).toContain('Entrar no Modo Demonstração (1 Clique)');
+    expect(html).toContain('data-testid="auth-heading-title"');
+    expect(html).toContain('Acesse sua conta');
+    expect(html).toContain('Informe suas credenciais para continuar');
+    expect(html).not.toContain('data-testid="auth-mode-login"');
+    expect(html).not.toContain('data-testid="auth-mode-signup"');
+    expect(html).not.toContain('data-testid="demo-mode-btn"');
+    expect(html).not.toContain('Entrar no Modo Demonstração (1 Clique)');
+    expect(html).toContain('data-testid="demo-credentials-card"');
+    expect(html).toContain('data-testid="fill-demo-credentials-btn"');
+    expect(html).toContain('demo@personalcontroller.app');
+    expect(html).toContain('Demo@123456'); // allowlist-secret
     expect(html).toContain('<style id="pc-design-tokens">');
   });
 
-  test('2. renderLandingPage({ mode: "signup" }) gera documento em modo cadastro', () => {
+  test('2. renderLandingPage({ mode: "signup" }) gera documento em modo cadastro com cabeçalho contextual "Crie sua conta"', () => {
     const html = renderLandingPage({ mode: 'signup' });
     expect(html).toContain('data-auth-mode="signup"');
+    expect(html).toContain('Crie sua conta');
+    expect(html).toContain('Comece a controlar suas finanças hoje');
     expect(html).toContain('Criar Conta Segura');
+    expect(html).not.toContain('data-testid="auth-mode-signup"');
+    expect(html).not.toContain('data-testid="demo-mode-btn"');
   });
 
   test('3. Rota GET /login e GET /signup retornam HTTP 200 com text/html da tela de autenticação', async () => {
@@ -33,7 +46,7 @@ describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /
     expect(signupRes.text).toContain('data-auth-mode="signup"');
   });
 
-  test('4. Rota raiz GET / com header de navegador (Accept: text/html) entrega a tela visual de autenticação', async () => {
+  test('4. Rota raiz GET / com header de navegador (Accept: text/html) entrega a tela visual de autenticação refinada', async () => {
     const browserRes = await request(app)
       .get('/')
       .set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
@@ -41,7 +54,8 @@ describe('E05.T03 & E05.T04 — Integração Visual de Autenticação (/login, /
     expect(browserRes.status).toBe(200);
     expect(browserRes.headers['content-type']).toMatch(/text\/html/);
     expect(browserRes.text).toContain('data-testid="auth-view"');
-    expect(browserRes.text).toContain('Entrar no Modo Demonstração (1 Clique)');
+    expect(browserRes.text).toContain('data-testid="demo-credentials-card"');
+    expect(browserRes.text).not.toContain('data-testid="demo-mode-btn"');
   });
 
   test('5. Rota raiz GET / preserva o contrato JSON para clientes de API e ferramentas sem text/html', async () => {

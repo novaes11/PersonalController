@@ -1,6 +1,12 @@
-const { getSupabaseClient, getSupabaseAdminClient } = require('../lib/supabase');
+const { getSupabaseClient, getSupabaseAdminClient, createLocalDevSupabaseClient } = require('../lib/supabase');
 const { syncUserProfile, resolveProfileDbClient } = require('../services/supabase.service');
 const { signupSchema, loginSchema, sanitizeUser } = require('../schemas/auth.schema');
+
+const DEMO_EMAIL = 'demo@personalcontroller.app';
+
+function getDemoAccountPassword() {
+  return process.env.DEMO_ACCOUNT_PASSWORD || 'Demo@123456'; // allowlist-secret
+}
 
 function formatZodIssues(issues) {
   return issues.map(i => {
@@ -167,12 +173,27 @@ async function login(req, res) {
     }
 
     const { email, password } = validation.data;
+    const isDemoAccount = email.toLowerCase() === DEMO_EMAIL;
     const supabase = getSupabaseClient(req);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    let authRes = await supabase.auth.signInWithPassword({
       email,
       password
     });
+
+    if (
+      (authRes?.error || !authRes?.data?.session?.access_token) &&
+      isDemoAccount &&
+      password === getDemoAccountPassword() &&
+      typeof createLocalDevSupabaseClient === 'function'
+    ) {
+      authRes = await createLocalDevSupabaseClient(req).auth.signInWithPassword({
+        email,
+        password
+      });
+    }
+
+    const { data, error } = authRes || {};
 
     if (error || !data?.session?.access_token) {
       return res.status(401).json({
@@ -193,11 +214,14 @@ async function login(req, res) {
       token_type: data.session.token_type || 'bearer' // allowlist-secret
     };
 
+    const sanitizedUser = sanitizeUser(data.user);
+
     return res.status(200).json({
       status: 'ok',
-      message: 'Autenticado com sucesso',
+      message: isDemoAccount ? 'Acesso de demonstração autenticado com sucesso' : 'Autenticado com sucesso',
+      isDemo: isDemoAccount,
       token: sessionPayload.access_token, // allowlist-secret
-      user: sanitizeUser(data.user),
+      user: isDemoAccount && sanitizedUser ? { ...sanitizedUser, isDemo: true } : sanitizedUser,
       session: sessionPayload
     });
   } catch (err) {
