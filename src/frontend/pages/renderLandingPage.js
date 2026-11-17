@@ -116,12 +116,38 @@ ${tokensCss}
         } catch (err) {}
       }
 
-      // Auto-redirecionamento se já houver sessão ativa salva
+      function clearSessionStorage() {
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+        try {
+          sessionStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+      }
+
+      const searchQuery = window.location.search || '';
+      const isLogoutRedirect = searchQuery.includes('logout=true');
+      const isSessionExpiredRedirect = searchQuery.includes('session_expired=true');
+
+      if (isLogoutRedirect || isSessionExpiredRedirect) {
+        clearSessionStorage();
+      }
+
+      // Auto-redirecionamento se já houver sessão ativa e não expirada salva
       try {
         const existingSession = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
-        if (existingSession && !window.location.search.includes('logout=true')) {
+        if (existingSession && !isLogoutRedirect && !isSessionExpiredRedirect) {
           const parsed = JSON.parse(existingSession);
-          if (parsed && (parsed.token || parsed.isDemo)) {
+          const rawToken = parsed && (parsed.token || (parsed.session && parsed.session.access_token));
+          const hasValidJwt = typeof rawToken === 'string' && rawToken.trim().length > 0 && !rawToken.startsWith('session-');
+          const isDemoSession = Boolean(parsed && (parsed.isDemo === true || parsed.isDemoMode === true));
+          const expiresAt = Number((parsed && (parsed.expires_at || (parsed.session && parsed.session.expires_at))) || 0);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const isExpired = !isDemoSession && expiresAt > 0 && expiresAt <= nowSec;
+
+          if (isExpired) {
+            clearSessionStorage();
+          } else if (hasValidJwt || isDemoSession) {
             window.location.href = '/dashboard';
             return;
           }
@@ -133,10 +159,11 @@ ${tokensCss}
       let currentMode = '${mode}';
       const form = document.querySelector('[data-testid="auth-form"]');
       const authView = document.querySelector('[data-testid="auth-view"]');
-      const loginTab = document.querySelector('[data-testid="auth-mode-login"]');
-      const signupTab = document.querySelector('[data-testid="auth-mode-signup"]');
+      const headingTitleEl = document.getElementById('auth-heading-title');
+      const headingSubtitleEl = document.getElementById('auth-heading-subtitle');
+      const demoCredentialsCard = document.getElementById('demo-credentials-card');
+      const fillDemoBtn = document.querySelector('[data-testid="fill-demo-credentials-btn"]');
       const submitBtn = document.querySelector('[data-testid="auth-submit-btn"]');
-      const demoBtn = document.querySelector('[data-testid="demo-mode-btn"]');
       const emailInput = document.querySelector('[data-testid="auth-email-input"]');
       const passwordInput = document.querySelector('[data-testid="auth-password-input"]'); // allowlist-secret
       const confirmContainer = document.getElementById('confirm-password-container');
@@ -163,19 +190,29 @@ ${tokensCss}
           .forEach(el => el.remove());
       }
 
+      if (isSessionExpiredRedirect && form) {
+        showAlert('error', 'Sua sessão expirou. Faça login novamente para continuar.');
+      }
+
       function translateErrorMessage(rawMessage, isSignup) {
         if (!rawMessage) {
           return isSignup ? 'Erro ao criar conta.' : 'Credenciais inválidas.';
         }
         const lower = String(rawMessage).toLowerCase();
-        if (lower.includes('already registered') || lower.includes('already exists')) {
+        if (lower.includes('already registered') || lower.includes('already exists') || lower.includes('já cadastrado')) {
           return 'Este endereço de e-mail já está cadastrado. Tente entrar na conta.';
         }
-        if (lower.includes('invalid login credentials')) {
-          return 'E-mail ou senha incorretos.';
+        if (lower.includes('invalid login credentials') || lower.includes('credenciais inválidas')) {
+          return 'Credenciais inválidas: e-mail ou senha incorretos.';
         }
-        if (lower.includes('email not confirmed')) {
+        if (lower.includes('email not confirmed') || lower.includes('não confirmado')) {
           return 'Confirme seu e-mail antes de fazer login (verifique sua caixa de entrada).';
+        }
+        if (lower.includes('rate limit') || lower.includes('muitas tentativas')) {
+          return 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
+        }
+        if (lower.includes('fetch failed') || lower.includes('failed to fetch')) {
+          return 'Falha de comunicação com o servidor de autenticação. Tente novamente em instantes.';
         }
         return rawMessage;
       }
@@ -235,18 +272,24 @@ ${tokensCss}
         const isSignup = newMode === 'signup';
         clearAlerts();
 
-        if (loginTab) {
-          loginTab.setAttribute('aria-selected', !isSignup ? 'true' : 'false');
-          loginTab.className = !isSignup
-            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all bg-indigo-600 text-white shadow-sm'
-            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        if (headingTitleEl) {
+          headingTitleEl.textContent = isSignup ? 'Crie sua conta' : 'Acesse sua conta';
         }
 
-        if (signupTab) {
-          signupTab.setAttribute('aria-selected', isSignup ? 'true' : 'false');
-          signupTab.className = isSignup
-            ? 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all bg-indigo-600 text-white shadow-sm'
-            : 'touch-target rounded-lg text-xs md:text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        if (headingSubtitleEl) {
+          headingSubtitleEl.textContent = isSignup
+            ? 'Comece a controlar suas finanças hoje'
+            : 'Informe suas credenciais para continuar';
+        }
+
+        if (demoCredentialsCard) {
+          if (isSignup) {
+            demoCredentialsCard.classList.remove('block');
+            demoCredentialsCard.classList.add('hidden');
+          } else {
+            demoCredentialsCard.classList.remove('hidden');
+            demoCredentialsCard.classList.add('block');
+          }
         }
 
         if (submitBtn) {
@@ -296,8 +339,6 @@ ${tokensCss}
         }
       }
 
-      if (loginTab) loginTab.addEventListener('click', () => setMode('login'));
-      if (signupTab) signupTab.addEventListener('click', () => setMode('signup'));
       if (authFooterToggleBtn) {
         authFooterToggleBtn.addEventListener('click', () => {
           setMode(currentMode === 'signup' ? 'login' : 'signup');
@@ -327,23 +368,19 @@ ${tokensCss}
         });
       });
 
-      // Modo Demonstração (1 Clique)
-      if (demoBtn) {
-        demoBtn.addEventListener('click', () => {
-          const demoSession = {
-            isDemo: true,
-            user: {
-              email: 'demo@personalcontroller.app',
-              name: 'Investidor Demo',
-              isDemo: true
-            },
-            token: 'demo-token-' + Date.now() // allowlist-secret
-          };
-          saveSessionStorage(demoSession);
-          showAlert('success', 'Acesso ao Modo Demonstração concedido! Redirecionando...');
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 300);
+      // Preenchimento rápido das credenciais oficiais de demonstração (AUTH-03)
+      if (fillDemoBtn) {
+        fillDemoBtn.addEventListener('click', () => {
+          if (currentMode !== 'login') {
+            setMode('login');
+          }
+          if (emailInput) emailInput.value = 'demo@personalcontroller.app';
+          if (passwordInput) {
+            passwordInput.value = 'Demo@123456'; // allowlist-secret
+            passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          showAlert('success', 'Credenciais de demonstração preenchidas. Clique em "Entrar na Conta" para acessar.');
+          if (submitBtn) submitBtn.focus();
         });
       }
 
@@ -425,18 +462,44 @@ ${tokensCss}
               return;
             }
 
-            // Sessão autenticada com sucesso
+            // Extração do token JWT real retornado pelo backend / Supabase Auth
+            const resolvedToken = data.token || (data.session && data.session.access_token) || null; // allowlist-secret
+            if (!resolvedToken || data.requiresEmailConfirmation || data.requires_email_confirmation) {
+              clearSessionStorage();
+              if (passwordInput) passwordInput.value = '';
+              if (confirmPasswordInput) confirmPasswordInput.value = '';
+              setMode('login');
+              showAlert(
+                'success',
+                data.message || 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+              );
+              return;
+            }
+
+            const isDemoAccount = Boolean(
+              currentMode === 'login' &&
+                (data.isDemo === true ||
+                  (data.user && data.user.isDemo === true) ||
+                  email === 'demo@personalcontroller.app')
+            );
+
+            // Sessão autenticada com sucesso (JWT válido; ativa modo demo apenas se autenticado com a conta demo oficial)
             const sessionData = {
-              token: data.token || data.session?.access_token || 'session-' + Date.now(), // allowlist-secret
-              user: data.user || { email },
-              isDemo: false
+              token: resolvedToken, // allowlist-secret
+              expires_at: (data.session && data.session.expires_at) || null,
+              user: Object.assign({}, data.user || { email }, { isDemo: isDemoAccount }),
+              session: data.session || { access_token: resolvedToken, token_type: 'bearer' }, // allowlist-secret
+              isDemo: isDemoAccount,
+              isDemoMode: isDemoAccount
             };
             saveSessionStorage(sessionData);
             showAlert(
               'success',
               currentMode === 'signup'
                 ? 'Conta criada com sucesso! Redirecionando para o painel...'
-                : 'Autenticação realizada com sucesso! Redirecionando...'
+                : isDemoAccount
+                  ? 'Acesso de demonstração autenticado! Redirecionando para o painel...'
+                  : 'Autenticação realizada com sucesso! Redirecionando...'
             );
             setTimeout(() => {
               window.location.href = '/dashboard';

@@ -1,4 +1,9 @@
 const {
+  SESSION_STORAGE_KEY,
+  DEMO_CREDENTIALS,
+  saveAuthSession,
+  loadAuthSession,
+  clearAuthSession,
   buildAuthPayload,
   loginUser,
   signupUser,
@@ -15,8 +20,8 @@ const EYE_ICON_SVG =
 const EYE_OFF_ICON_SVG =
   '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
 
-const SPARKLES_ICON_SVG =
-  '<svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>';
+const KEY_ICON_SVG =
+  '<svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>';
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -57,8 +62,8 @@ function checkPasswordRequirements(password = '', confirmPassword = '') {
 
 /**
  * Renderiza o HTML SSR/isomórfico da Tela de Autenticação (/login, /signup)
- * com design limpo, checklist de senha em tempo real, confirmação de senha
- * e alternância fluida na base do formulário.
+ * com design limpo (UI-01), checklist de senha em tempo real, confirmação de senha,
+ * alternância exclusiva na base do formulário e acesso de demonstração via credenciais (AUTH-03).
  */
 function renderAuthViewMarkup({
   mode = 'login',
@@ -71,6 +76,10 @@ function renderAuthViewMarkup({
 } = {}) {
   const isSignup = mode === 'signup';
   const passwordAutocomplete = isSignup ? 'new-password' : 'current-password';
+  const headingTitle = isSignup ? 'Crie sua conta' : 'Acesse sua conta';
+  const headingSubtitle = isSignup
+    ? 'Comece a controlar suas finanças hoje'
+    : 'Informe suas credenciais para continuar';
   const submitLabel = isSubmitting
     ? isSignup
       ? 'Criando conta...'
@@ -123,7 +132,7 @@ function renderAuthViewMarkup({
       class="rounded-2xl border border-slate-800/80 bg-slate-900/90 p-6 md:p-8 shadow-2xl backdrop-blur-sm"
       style="background-color: var(--bg-surface); border-color: var(--border-subtle);"
     >
-      <div class="flex items-center gap-3.5 mb-6">
+      <div class="flex items-center gap-3.5 mb-5">
         <span class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-sm shrink-0">
           ${LOCK_ICON_SVG}
         </span>
@@ -133,36 +142,22 @@ function renderAuthViewMarkup({
         </div>
       </div>
 
-      <!-- Alternância de Modo (Abas superiores discretas) -->
-      <div
-        role="tablist"
-        aria-label="Modo de autenticação"
-        class="grid grid-cols-2 gap-1.5 p-1 mb-6 rounded-xl bg-slate-950/80 border border-slate-800/80"
-      >
-        <button
-          type="button"
-          role="tab"
-          data-testid="auth-mode-login"
-          aria-selected="${!isSignup ? 'true' : 'false'}"
-          class="touch-target rounded-lg text-xs md:text-sm font-semibold transition-all ${
-            !isSignup ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-          }"
-          style="min-height: 44px; min-width: 44px;"
+      <!-- Título Contextual de Ação (UI-01: sem botões de alternância ambíguos no topo) -->
+      <div class="mb-6 pb-4 border-b border-slate-800/80" data-testid="auth-context-header">
+        <h2
+          id="auth-heading-title"
+          data-testid="auth-heading-title"
+          class="text-base md:text-lg font-semibold tracking-tight text-slate-100"
         >
-          Entrar
-        </button>
-        <button
-          type="button"
-          role="tab"
-          data-testid="auth-mode-signup"
-          aria-selected="${isSignup ? 'true' : 'false'}"
-          class="touch-target rounded-lg text-xs md:text-sm font-semibold transition-all ${
-            isSignup ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-          }"
-          style="min-height: 44px; min-width: 44px;"
+          ${escapeHtml(headingTitle)}
+        </h2>
+        <p
+          id="auth-heading-subtitle"
+          data-testid="auth-heading-subtitle"
+          class="text-xs text-slate-400 mt-1"
         >
-          Criar Conta
-        </button>
+          ${escapeHtml(headingSubtitle)}
+        </p>
       </div>
 
       ${errorBannerHtml}
@@ -255,7 +250,7 @@ function renderAuthViewMarkup({
         >
           <div class="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400">
             <span>Requisitos de segurança</span>
-            <span id="password-req-counter" class="text-[10px] text-slate-400">0/5</span>
+            <span id="password-req-counter" class="text-[10px] text-slate-400">0/6</span>
           </div>
           <ul class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 text-xs" role="list">
             ${renderReqItem('length', 'Mínimo 8 caracteres', reqStatus.length)}
@@ -278,7 +273,7 @@ function renderAuthViewMarkup({
         </button>
       </form>
 
-      <!-- Alternância na Base do Formulário ("Não possui conta?..." / "Já possui conta?...") -->
+      <!-- Alternância Exclusiva na Base do Formulário ("Não possui uma conta?..." / "Já possui uma conta?...") -->
       <div
         class="mt-5 pt-4 border-t border-slate-800/80 text-center text-xs text-slate-400"
         data-testid="auth-footer-prompt"
@@ -294,22 +289,37 @@ function renderAuthViewMarkup({
         </button>
       </div>
 
-      <div class="relative my-6 flex items-center justify-center">
-        <div class="border-t border-slate-800/80 w-full"></div>
-        <span class="bg-slate-900 px-3 text-[11px] text-slate-400 uppercase tracking-wider">ou explore sem cadastro</span>
-        <div class="border-t border-slate-800/80 w-full"></div>
-      </div>
-
-      <!-- Modo Demonstração Interativo (1 Clique) -->
-      <button
-        type="button"
-        data-testid="demo-mode-btn"
-        class="touch-target w-full flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 font-semibold text-xs md:text-sm py-3 transition-colors"
-        style="min-height: 48px;"
+      <!-- Acesso de Demonstração via Credenciais Reais (AUTH-03: sem botão 1 clique) -->
+      <div
+        id="demo-credentials-card"
+        data-testid="demo-credentials-card"
+        class="${!isSignup ? 'block' : 'hidden'} mt-5 p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/60"
       >
-        ${SPARKLES_ICON_SVG}
-        <span>Entrar no Modo Demonstração (1 Clique)</span>
-      </button>
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+            ${KEY_ICON_SVG}
+            <span>Acesso de Demonstração</span>
+          </span>
+          <button
+            type="button"
+            id="fill-demo-credentials-btn"
+            data-testid="fill-demo-credentials-btn"
+            class="text-xs font-medium text-indigo-400 hover:text-indigo-300 underline underline-offset-2 transition-colors"
+          >
+            Preencher credenciais
+          </button>
+        </div>
+        <div class="space-y-1 text-xs text-slate-400">
+          <div class="flex items-center justify-between gap-2">
+            <span>E-mail:</span>
+            <code class="font-mono text-slate-200 select-all">${DEMO_CREDENTIALS.email}</code>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span>Senha:</span>
+            <code class="font-mono text-slate-200 select-all">${DEMO_CREDENTIALS.password}</code>
+          </div>
+        </div>
+      </div>
     </div>
   </section>`;
 }
@@ -333,7 +343,7 @@ function createAuthViewElement(React, props = {}) {
     onModeChange,
     onFieldChange,
     onSubmit,
-    onDemoStart
+    onFillDemoCredentials
   } = props;
 
   const isSignup = mode === 'signup';
@@ -348,28 +358,16 @@ function createAuthViewElement(React, props = {}) {
     },
     React.createElement(
       'div',
-      { role: 'tablist', className: 'grid grid-cols-2 gap-2 mb-6' },
+      { 'data-testid': 'auth-context-header', className: 'mb-6 pb-4 border-b border-slate-800/80' },
       React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'auth-mode-login',
-          'aria-selected': !isSignup ? 'true' : 'false',
-          style: { minHeight: '44px', minWidth: '44px' },
-          onClick: () => typeof onModeChange === 'function' && onModeChange('login')
-        },
-        'Entrar'
+        'h2',
+        { id: 'auth-heading-title', 'data-testid': 'auth-heading-title' },
+        isSignup ? 'Crie sua conta' : 'Acesse sua conta'
       ),
       React.createElement(
-        'button',
-        {
-          type: 'button',
-          'data-testid': 'auth-mode-signup',
-          'aria-selected': isSignup ? 'true' : 'false',
-          style: { minHeight: '44px', minWidth: '44px' },
-          onClick: () => typeof onModeChange === 'function' && onModeChange('signup')
-        },
-        'Criar Conta'
+        'p',
+        { id: 'auth-heading-subtitle', 'data-testid': 'auth-heading-subtitle' },
+        isSignup ? 'Comece a controlar suas finanças hoje' : 'Informe suas credenciais para continuar'
       )
     ),
     errorMessage
@@ -448,32 +446,47 @@ function createAuthViewElement(React, props = {}) {
         !isSignup ? 'Criar conta' : 'Fazer login'
       )
     ),
-    React.createElement(
-      'button',
-      {
-        type: 'button',
-        'data-testid': 'demo-mode-btn',
-        style: { minHeight: '48px' },
-        onClick: () => typeof onDemoStart === 'function' && onDemoStart()
-      },
-      'Entrar no Modo Demonstração (1 Clique)'
-    )
+    !isSignup
+      ? React.createElement(
+          'div',
+          { id: 'demo-credentials-card', 'data-testid': 'demo-credentials-card' },
+          React.createElement('code', null, DEMO_CREDENTIALS.email),
+          React.createElement('code', null, DEMO_CREDENTIALS.password),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              id: 'fill-demo-credentials-btn',
+              'data-testid': 'fill-demo-credentials-btn',
+              onClick: () => {
+                if (typeof onFillDemoCredentials === 'function') {
+                  onFillDemoCredentials(DEMO_CREDENTIALS);
+                } else if (typeof onFieldChange === 'function') {
+                  onFieldChange('email', DEMO_CREDENTIALS.email);
+                  onFieldChange('password', DEMO_CREDENTIALS.password);
+                }
+              }
+            },
+            'Preencher credenciais'
+          )
+        )
+      : null
   );
 }
 
-const SESSION_STORAGE_KEY = 'pc_auth_session';
-
 /**
- * Controlador de autenticação (`/login`, `/signup`, `/logout`) e Modo Demonstração (E05.T03).
+ * Controlador de autenticação (`/login`, `/signup`, `/logout`) e Modo Demonstração via Credenciais (E05.T03, AUTH-02 & AUTH-03).
  */
 function createAuthViewController({
   initialMode = 'login',
   baseUrl = '/api',
+  redirectUrl = '/dashboard',
   fetchImpl = global.fetch,
   storage = null,
   onAuthenticated,
   onDemoActivated,
-  onLoggedOut
+  onLoggedOut,
+  onRedirect
 } = {}) {
   let state = {
     mode: initialMode === 'signup' ? 'signup' : 'login',
@@ -485,8 +498,11 @@ function createAuthViewController({
     successMessage: null,
     user: null,
     session: null,
+    token: null,
     isDemoMode: false,
-    demoData: null
+    isDemo: false,
+    demoData: null,
+    redirectTo: null
   };
 
   function getState() {
@@ -513,16 +529,44 @@ function createAuthViewController({
     return getState();
   }
 
+  function fillDemoCredentials() {
+    state = {
+      ...state,
+      mode: 'login',
+      email: DEMO_CREDENTIALS.email,
+      password: DEMO_CREDENTIALS.password, // allowlist-secret
+      confirmPassword: '',
+      errorMessage: null,
+      successMessage: null
+    };
+    return getState();
+  }
+
   function persistSession(sessionPayload) {
-    if (storage && typeof storage.setItem === 'function') {
-      storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionPayload));
-    }
+    return saveAuthSession(sessionPayload, storage);
   }
 
   function clearPersistedSession() {
-    if (storage && typeof storage.removeItem === 'function') {
-      storage.removeItem(SESSION_STORAGE_KEY);
+    clearAuthSession(storage);
+  }
+
+  function restoreSession(nowSeconds = Math.floor(Date.now() / 1000)) {
+    const restored = loadAuthSession(storage, nowSeconds);
+    if (!restored) {
+      return null;
     }
+
+    state = {
+      ...state,
+      user: restored.user,
+      session: restored.session,
+      token: restored.token, // allowlist-secret
+      isDemoMode: restored.isDemo,
+      isDemo: restored.isDemo,
+      demoData: restored.isDemo ? createDemoDataset() : null,
+      errorMessage: null
+    };
+    return getState();
   }
 
   async function submit() {
@@ -561,32 +605,90 @@ function createAuthViewController({
     try {
       const action = state.mode === 'signup' ? signupUser : loginUser;
       const result = await action(validation.payload, { baseUrl, fetchImpl });
+      const resolvedToken = result.token || result.session?.access_token || null; // allowlist-secret
+
+      if (!resolvedToken) {
+        clearPersistedSession();
+        state = {
+          ...state,
+          mode: 'login',
+          isSubmitting: false,
+          user: result.user,
+          session: null,
+          token: null,
+          isDemoMode: false,
+          isDemo: false,
+          demoData: null,
+          redirectTo: null,
+          password: '',
+          confirmPassword: '',
+          successMessage:
+            result.message ||
+            'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.'
+        };
+
+        return {
+          ok: true,
+          user: result.user,
+          session: null,
+          token: null,
+          requiresEmailConfirmation: true,
+          requires_email_confirmation: true
+        };
+      }
+
+      const isDemoLogin =
+        state.mode === 'login' &&
+        Boolean(result.isDemo === true || validation.payload.email === DEMO_CREDENTIALS.email);
+      const demoData = isDemoLogin ? createDemoDataset() : null;
+
+      const persistedRecord = persistSession({
+        user: isDemoLogin
+          ? { ...demoData.user, ...(result.user || {}), isDemo: true }
+          : result.user,
+        session: result.session,
+        token: resolvedToken, // allowlist-secret
+        isDemo: isDemoLogin
+      });
 
       state = {
         ...state,
         isSubmitting: false,
-        user: result.user,
-        session: result.session,
-        isDemoMode: false,
-        demoData: null,
+        user: persistedRecord.user,
+        session: persistedRecord.session,
+        token: persistedRecord.token, // allowlist-secret
+        isDemoMode: isDemoLogin,
+        isDemo: isDemoLogin,
+        demoData,
+        redirectTo: redirectUrl,
         password: '',
         confirmPassword: '',
         successMessage: result.message
       };
 
-      if (result.session) {
-        persistSession({
-          user: result.user,
-          session: result.session,
-          isDemoMode: false
-        });
+      if (isDemoLogin && typeof onDemoActivated === 'function') {
+        onDemoActivated(demoData, getState());
       }
 
       if (typeof onAuthenticated === 'function') {
         onAuthenticated(getState());
       }
 
-      return { ok: true, user: result.user, session: result.session };
+      if (typeof onRedirect === 'function') {
+        onRedirect(redirectUrl, getState());
+      }
+
+      return {
+        ok: true,
+        isDemo: isDemoLogin,
+        demoData,
+        user: state.user,
+        session: state.session,
+        token: state.token, // allowlist-secret
+        redirectTo: redirectUrl,
+        requiresEmailConfirmation: false,
+        requires_email_confirmation: false
+      };
     } catch (err) {
       state = {
         ...state,
@@ -598,34 +700,42 @@ function createAuthViewController({
   }
 
   /**
-   * Ativa o Modo Demonstração com 1 Clique populando transações, categorias e carteira B3/FII/Cripto.
+   * Ativa o Modo Demonstração programaticamente populando transações, categorias e carteira B3/FII/Cripto.
    */
   function enterDemoMode() {
     const demoData = createDemoDataset();
+    const persistedDemo = persistSession({
+      user: demoData.user,
+      session: { token_type: 'demo', expires_at: null }, // allowlist-secret
+      isDemo: true
+    });
+
     state = {
       ...state,
       user: demoData.user,
-      session: { token_type: 'demo', expires_at: null },
+      session: persistedDemo.session,
+      token: persistedDemo.token, // allowlist-secret
       isDemoMode: true,
+      isDemo: true,
       demoData,
+      redirectTo: redirectUrl,
       errorMessage: null,
       successMessage: 'Modo Demonstração ativado com sucesso!'
     };
 
-    persistSession({
-      user: demoData.user,
-      isDemoMode: true
-    });
-
     if (typeof onDemoActivated === 'function') {
       onDemoActivated(demoData, getState());
+    }
+
+    if (typeof onRedirect === 'function') {
+      onRedirect(redirectUrl, getState());
     }
 
     return demoData;
   }
 
   async function logout() {
-    const token = state.session?.access_token; // allowlist-secret
+    const token = state.token || state.session?.access_token; // allowlist-secret
     if (!state.isDemoMode && token) {
       try {
         await logoutUser({ token, baseUrl, fetchImpl });
@@ -639,8 +749,11 @@ function createAuthViewController({
       ...state,
       user: null,
       session: null,
+      token: null,
       isDemoMode: false,
+      isDemo: false,
       demoData: null,
+      redirectTo: null,
       password: '',
       confirmPassword: '',
       errorMessage: null,
@@ -670,6 +783,8 @@ function createAuthViewController({
     getState,
     setMode,
     setField,
+    fillDemoCredentials,
+    restoreSession,
     submit,
     enterDemoMode,
     logout,
@@ -679,6 +794,7 @@ function createAuthViewController({
 
 module.exports = {
   SESSION_STORAGE_KEY,
+  DEMO_CREDENTIALS,
   checkPasswordRequirements,
   renderAuthViewMarkup,
   createAuthViewElement,
