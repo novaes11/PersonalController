@@ -239,6 +239,8 @@ async function deleteTransactionById(transactionId, options = {}) {
   return body.data;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Normaliza payload do parser PDF para POST /api/transactions/parse-pdf (E07.T02).
  * Campos adicionais não são propagados para manter compatibilidade com schema .strict().
@@ -249,8 +251,15 @@ function buildParsePdfPayload(rawInput = {}) {
   const errors = [];
   const payload = {};
 
-  const hasBase64 = typeof rawInput.pdf_base64 === 'string' && rawInput.pdf_base64.trim().length > 0;
-  const hasRawText = typeof rawInput.raw_text === 'string' && rawInput.raw_text.trim().length > 0;
+  const normalizedBase64 = typeof rawInput.pdf_base64 === 'string'
+    ? rawInput.pdf_base64.trim().replace(/^data:application\/pdf;base64,/i, '').trim()
+    : '';
+  const normalizedRawText = typeof rawInput.raw_text === 'string'
+    ? rawInput.raw_text.trim()
+    : '';
+
+  const hasBase64 = normalizedBase64.length > 0;
+  const hasRawText = normalizedRawText.length > 0;
 
   if (!hasBase64 && !hasRawText) {
     errors.push({
@@ -260,14 +269,21 @@ function buildParsePdfPayload(rawInput = {}) {
   }
 
   if (hasBase64) {
-    payload.pdf_base64 = String(rawInput.pdf_base64).trim();
+    if (normalizedBase64.length > 7000000) {
+      errors.push({
+        field: 'pdf_base64',
+        message: 'O arquivo PDF excede o tamanho máximo permitido (5 MB).'
+      });
+    } else {
+      payload.pdf_base64 = normalizedBase64;
+    }
   }
   if (hasRawText) {
-    payload.raw_text = String(rawInput.raw_text).trim();
+    payload.raw_text = normalizedRawText;
   }
 
   const fileName = rawInput.file_name !== undefined && rawInput.file_name !== null
-    ? String(rawInput.file_name).trim()
+    ? String(rawInput.file_name).trim().slice(0, 120)
     : '';
   if (fileName) {
     payload.file_name = fileName;
@@ -338,7 +354,7 @@ async function parsePdfTransactions(parseInput, options = {}) {
     body: JSON.stringify(validation.payload)
   });
 
-  const body = await response.json();
+  const body = await response.json().catch(() => ({}));
   if (!response.ok || body.status === 'error') {
     const err = new Error(body.message || `Erro ao processar PDF (HTTP ${response.status})`);
     err.status = response.status;
@@ -351,6 +367,7 @@ async function parsePdfTransactions(parseInput, options = {}) {
 
 /**
  * Confirma importação em lote de transações extraídas de PDF via POST /api/transactions/batch.
+ * Normaliza cada item conforme batchTransactionItemSchema (.strict()) e garante UUID válido ou null em category_id.
  * @param {Array<object>} transactions
  * @param {object} [options]
  * @param {string} [options.token] JWT do usuário autenticado
@@ -364,18 +381,41 @@ async function submitBatchTransactions(transactions, options = {}) {
     throw err;
   }
 
-  const normalizedTransactions = transactions.map(tx => {
-    const normalized = {
-      amount: Number(tx.amount),
-      date: tx.date ? String(tx.date).trim() : '',
-      category_id: tx.category_id ? String(tx.category_id).trim() : null,
-      description: tx.description !== undefined && tx.description !== null
-        ? String(tx.description).trim()
-        : null,
-      is_automated: tx.is_automated !== false
-    };
+  if (transactions.length > 200) {
+    const err = new Error('O limite máximo por lote de importação é de 200 transações.');
+    err.status = 400;
+    throw err;
+  }
 
-    return normalized;
+  const normalizedTransactions = transactions.map((tx, idx) => {
+    const parsedAmount = Number(tx?.amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      const err = new Error(`Valor inválido na transação #${idx + 1} para importação em lote.`);
+      err.status = 400;
+      throw err;
+    }
+
+    const dateStr = tx?.date ? String(tx.date).trim() : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const err = new Error(`Data inválida na transação #${idx + 1}. Utilize o formato AAAA-MM-DD.`);
+      err.status = 400;
+      throw err;
+    }
+
+    const rawCategoryId = tx?.category_id ? String(tx.category_id).trim() : '';
+    const categoryId = rawCategoryId && UUID_REGEX.test(rawCategoryId) ? rawCategoryId : null;
+
+    const rawDescription = tx?.description !== undefined && tx?.description !== null
+      ? String(tx.description).trim()
+      : '';
+
+    return {
+      amount: Number(parsedAmount.toFixed(2)),
+      date: dateStr,
+      category_id: categoryId,
+      description: rawDescription ? rawDescription.slice(0, 255) : null,
+      is_automated: tx?.is_automated !== false
+    };
   });
 
   const headers = {
@@ -394,7 +434,7 @@ async function submitBatchTransactions(transactions, options = {}) {
     body: JSON.stringify({ transactions: normalizedTransactions })
   });
 
-  const body = await response.json();
+  const body = await response.json().catch(() => ({}));
   if (!response.ok || body.status === 'error') {
     const err = new Error(body.message || `Erro na confirmação em lote (HTTP ${response.status})`);
     err.status = response.status;

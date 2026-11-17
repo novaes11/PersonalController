@@ -46,7 +46,9 @@ function renderAppPage(options = {}) {
     categories: demoData.categories
   });
 
-  const inboxContentHtml = renderInboxViewMarkup();
+  const inboxContentHtml = renderInboxViewMarkup({
+    categories: demoData.categories
+  });
 
   // Envelopamento em containers de abas (tab panes) dinâmicos
   const tabsContentHtml = [
@@ -232,6 +234,50 @@ ${tokensCss}
         transactions: ${JSON.stringify(demoData.transactions)},
         categories: ${JSON.stringify(demoData.categories)},
         portfolio: ${JSON.stringify(demoData.portfolio)},
+        pdfImport: {
+          fileName: 'fatura_exemplo_demo.pdf',
+          documentType: 'AUTO',
+          isParsing: false,
+          isSubmitting: false,
+          transactions: [
+            {
+              fingerprint: 'tx-preview-1',
+              date: '2026-11-07',
+              description: 'SUPERMERCADO CENTRAL',
+              amount: 248.90,
+              type: 'EXPENSE',
+              category_id: '11111111-1111-4111-8111-111111111103',
+              suggested_category_name: 'Alimentação',
+              confidence_score: 0.92,
+              needs_review: false,
+              selected: true
+            },
+            {
+              fingerprint: 'tx-preview-2',
+              date: '2026-11-08',
+              description: 'UBER *TRIP 3321',
+              amount: 32.50,
+              type: 'EXPENSE',
+              category_id: '11111111-1111-4111-8111-111111111104',
+              suggested_category_name: 'Transporte',
+              confidence_score: 0.78,
+              needs_review: true,
+              selected: true
+            },
+            {
+              fingerprint: 'tx-preview-3',
+              date: '2026-11-10',
+              description: 'CREDITO SALARIO EMPRESA',
+              amount: 8500.00,
+              type: 'INCOME',
+              category_id: '11111111-1111-4111-8111-111111111101',
+              suggested_category_name: 'Salário',
+              confidence_score: 0.94,
+              needs_review: false,
+              selected: true
+            }
+          ]
+        },
         monthlyBudget: 5000,
         upcomingExpenses15d: 0
       };
@@ -359,6 +405,13 @@ ${tokensCss}
           if (isRealAuthSession) {
             state.transactions = [];
             state.categories = [];
+            state.pdfImport = {
+              fileName: '',
+              documentType: 'AUTO',
+              isParsing: false,
+              isSubmitting: false,
+              transactions: []
+            };
             state.portfolio = {
               total_portfolio_value: 0,
               total_invested_value: 0,
@@ -1168,6 +1221,10 @@ ${tokensCss}
             }).join('');
           }
         }
+
+        if (typeof renderPdfReconcileSection === 'function') {
+          renderPdfReconcileSection();
+        }
       }
 
       // Sincronização reativa de KPIs, Tabela e Fluxo de Caixa
@@ -1336,6 +1393,497 @@ ${tokensCss}
           }
         }
       });
+
+      // Upload, Conciliação e Confirmação em Lote de PDF (E07.T02)
+      var PDF_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      var MAX_PDF_UPLOAD_BYTES = 5 * 1024 * 1024;
+      var SAMPLE_EXTRACTED_RAW_TEXT = [
+        '07/11/2026 SUPERMERCADO CENTRAL -248,90',
+        '08/11/2026 UBER *TRIP 3321 -32,50',
+        '09/11/2026 IFOOD *RESTAURANTE -64,90',
+        '10/11/2026 CREDITO SALARIO EMPRESA +8.500,00'
+      ].join('\\n');
+
+      function normalizePdfTextForMatch(str) {
+        return String(str || '')
+          .normalize('NFD')
+          .replace(/[\\u0300-\\u036f]/g, '')
+          .toLowerCase()
+          .trim();
+      }
+
+      function resolvePdfRowCategoryId(tx) {
+        var cats = Array.isArray(state.categories) ? state.categories : [];
+        if (cats.length === 0) return '';
+
+        var directId = tx.category_id || tx.suggested_category_id || '';
+        if (directId && cats.some(function (c) { return c.id === directId; })) {
+          return directId;
+        }
+
+        var targetName = normalizePdfTextForMatch(tx.suggested_category_name || tx.categoryName || '');
+        if (targetName) {
+          var exact = cats.find(function (c) { return normalizePdfTextForMatch(c.name) === targetName; });
+          if (exact) return exact.id;
+          var partial = cats.find(function (c) {
+            var cname = normalizePdfTextForMatch(c.name);
+            return cname.indexOf(targetName) !== -1 || targetName.indexOf(cname) !== -1;
+          });
+          if (partial) return partial.id;
+        }
+
+        var txType = tx.type === 'INCOME' ? 'INCOME' : 'EXPENSE';
+        var byType = cats.find(function (c) { return c.type === txType; });
+        return byType ? byType.id : cats[0].id;
+      }
+
+      function formatPdfDateBR(dateStr) {
+        var parts = String(dateStr || '').split('-');
+        return parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : String(dateStr || '');
+      }
+
+      function updatePdfSelectionCounter() {
+        var items = (state.pdfImport && Array.isArray(state.pdfImport.transactions))
+          ? state.pdfImport.transactions
+          : [];
+        var selectedCount = items.filter(function (t) { return t.selected !== false; }).length;
+        var selectedEl = document.querySelector('[data-testid="pdf-selected-count"]');
+        var confirmBtn = document.querySelector('[data-testid="pdf-batch-confirm-btn"]');
+        if (selectedEl) {
+          selectedEl.textContent = selectedCount + ' selecionada(s) para importação';
+        }
+        if (confirmBtn) {
+          confirmBtn.disabled = selectedCount === 0 || Boolean(state.pdfImport && state.pdfImport.isSubmitting);
+        }
+      }
+
+      function renderPdfReconcileSection() {
+        var listEl = document.querySelector('[data-testid="pdf-reconcile-list"]');
+        var totalEl = document.querySelector('[data-testid="pdf-summary-total"]');
+        var reviewEl = document.querySelector('[data-testid="pdf-summary-review"]');
+        var highEl = document.querySelector('[data-testid="pdf-summary-high"]');
+
+        var items = (state.pdfImport && Array.isArray(state.pdfImport.transactions))
+          ? state.pdfImport.transactions
+          : [];
+
+        var totalCount = items.length;
+        var reviewCount = items.filter(function (t) { return Boolean(t.needs_review); }).length;
+        var highCount = Math.max(0, totalCount - reviewCount);
+
+        if (totalEl) totalEl.textContent = totalCount + (totalCount === 1 ? ' transação' : ' transações');
+        if (reviewEl) reviewEl.textContent = reviewCount + (reviewCount === 1 ? ' transação' : ' transações');
+        if (highEl) highEl.textContent = highCount + (highCount === 1 ? ' transação' : ' transações');
+
+        updatePdfSelectionCounter();
+        if (!listEl) return;
+
+        if (items.length === 0) {
+          listEl.innerHTML = '<li data-testid="pdf-reconcile-empty" class="rounded-xl border border-slate-800 bg-slate-950/40 p-6 text-center text-xs text-slate-400">Nenhuma transação aguardando conciliação. Selecione um arquivo PDF ou carregue um extrato de exemplo acima.</li>';
+          return;
+        }
+
+        var cats = Array.isArray(state.categories) ? state.categories : [];
+
+        listEl.innerHTML = items.map(function (tx, idx) {
+          var resolvedCatId = tx._categoryExplicit ? (tx.category_id || '') : resolvePdfRowCategoryId(tx);
+          tx.category_id = resolvedCatId || null;
+          var rowId = escapeHtml(tx.fingerprint || tx.id || ('row-' + idx));
+          var isIncome = tx.type === 'INCOME';
+          var amountLabel = (isIncome ? '+ R$ ' : '- R$ ') + formatCurrencyBRL(tx.amount);
+          var needsReview = Boolean(tx.needs_review);
+          var statusLabel = needsReview ? 'Revisar' : 'Alta confiança';
+          var statusClass = needsReview
+            ? 'text-amber-300 border-amber-800 bg-amber-950'
+            : 'text-emerald-300 border-emerald-800 bg-emerald-950';
+          var amountBadgeClass = isIncome
+            ? 'text-emerald-300 bg-emerald-950 border-emerald-800'
+            : 'text-rose-300 bg-rose-950 border-rose-800';
+          var isChecked = tx.selected !== false;
+
+          var catOptionsHtml = '<option value="">Sem categoria</option>' + cats.map(function (c) {
+            var typeLabel = c.type === 'INCOME' ? 'Receita' : 'Despesa';
+            var sel = c.id === resolvedCatId ? ' selected' : '';
+            return '<option value="' + escapeHtml(c.id) + '"' + sel + '>' + escapeHtml(c.name) + ' (' + typeLabel + ')</option>';
+          }).join('');
+
+          return '<li data-testid="pdf-reconcile-row-' + rowId + '" data-row-index="' + idx + '" class="rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 space-y-3">' +
+            '<div class="flex items-start justify-between gap-3">' +
+              '<div class="flex items-start gap-3 min-w-0 flex-1">' +
+                '<label for="pdf-select-' + rowId + '" class="touch-target inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 shrink-0 cursor-pointer" style="min-height: 44px; min-width: 44px;">' +
+                  '<input id="pdf-select-' + rowId + '" type="checkbox" data-testid="pdf-select-tx-' + rowId + '" data-row-index="' + idx + '" class="pdf-row-checkbox h-4 w-4 rounded border-slate-600 text-indigo-500"' + (isChecked ? ' checked' : '') + ' />' +
+                '</label>' +
+                '<div class="min-w-0 flex-1 space-y-1">' +
+                  '<div class="flex flex-wrap items-center gap-2">' +
+                    '<span class="text-xs text-slate-400 tabular-nums">' + escapeHtml(formatPdfDateBR(tx.date)) + '</span>' +
+                    '<span class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold tabular-nums ' + amountBadgeClass + '">' + escapeHtml(amountLabel) + '</span>' +
+                  '</div>' +
+                  '<p class="text-sm font-semibold text-slate-100 truncate">' + escapeHtml(tx.description) + '</p>' +
+                '</div>' +
+              '</div>' +
+              '<span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold shrink-0 ' + statusClass + '">' + escapeHtml(statusLabel) + '</span>' +
+            '</div>' +
+            '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+              '<div class="space-y-1">' +
+                '<label class="text-xs text-slate-400 block" for="pdf-desc-' + rowId + '">Descrição ajustável</label>' +
+                '<input id="pdf-desc-' + rowId + '" type="text" maxlength="255" data-row-index="' + idx + '" data-testid="pdf-desc-input-' + rowId + '" value="' + escapeHtml(tx.description) + '" class="pdf-desc-input touch-target w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100" style="min-height: 44px; min-width: 44px;" />' +
+              '</div>' +
+              '<div class="space-y-1">' +
+                '<label class="text-xs text-slate-400 block" for="pdf-category-' + rowId + '">Categoria sugerida</label>' +
+                '<select id="pdf-category-' + rowId + '" data-row-index="' + idx + '" data-testid="pdf-category-select-' + rowId + '" class="pdf-category-select touch-target w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100" style="min-height: 44px; min-width: 44px;">' +
+                  catOptionsHtml +
+                '</select>' +
+              '</div>' +
+            '</div>' +
+          '</li>';
+        }).join('');
+      }
+
+      function readPdfFileAsBase64(file) {
+        return new Promise(function (resolve, reject) {
+          if (!file) {
+            resolve('');
+            return;
+          }
+          if (file.size > MAX_PDF_UPLOAD_BYTES) {
+            reject(new Error('O arquivo PDF excede o limite máximo permitido de 5 MB.'));
+            return;
+          }
+          var reader = new FileReader();
+          reader.onload = function () {
+            var result = typeof reader.result === 'string' ? reader.result : '';
+            var cleaned = result.replace(/^data:[^;]+;base64,/i, '').trim();
+            resolve(cleaned);
+          };
+          reader.onerror = function () {
+            reject(new Error('Não foi possível ler o arquivo PDF selecionado.'));
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function parseDemoStatementLines(rawText, referenceYear) {
+        var year = Number(referenceYear) || new Date().getFullYear();
+        var lines = String(rawText || '').split(/\\r?\\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+        var parsed = [];
+        var lineRx = /^(\\d{4}-\\d{2}-\\d{2}|\\d{2}\\/\\d{2}(?:\\/\\d{2,4})?)\\s+(.+?)\\s+([+-]?\\s*(?:R\\$\\s*)?[+-]?\\s*[\\d.,]+)$/;
+
+        lines.forEach(function (line, idx) {
+          var m = line.match(lineRx);
+          if (!m) return;
+          var rawDate = m[1];
+          var desc = m[2].trim().slice(0, 255);
+          var rawVal = m[3];
+          var isIncome = /\\+/.test(rawVal) || /SALARIO|DIVIDENDOS|PIX RECEBIDO|RENDIMENTO/i.test(desc);
+          var numericStr = rawVal.replace(/[^0-9.,]/g, '');
+          if (numericStr.indexOf(',') !== -1) {
+            numericStr = numericStr.replace(/\\./g, '').replace(',', '.');
+          }
+          var amount = Number(parseFloat(numericStr).toFixed(2));
+          if (!Number.isFinite(amount) || amount <= 0) return;
+
+          var isoDate = String(year) + '-11-01';
+          if (/^\\d{4}-\\d{2}-\\d{2}$/.test(rawDate)) {
+            isoDate = rawDate;
+          } else {
+            var dParts = rawDate.split('/');
+            if (dParts.length === 3) {
+              var fullY = dParts[2].length === 2 ? ('20' + dParts[2]) : dParts[2];
+              isoDate = fullY + '-' + dParts[1] + '-' + dParts[0];
+            } else if (dParts.length === 2) {
+              isoDate = String(year) + '-' + dParts[1] + '-' + dParts[0];
+            }
+          }
+
+          var suggestedName = isIncome
+            ? 'Salário'
+            : (/UBER|POSTO|99POP/i.test(desc) ? 'Transporte' : (/IFOOD|SUPERMERCADO|MERCADO|PADARIA/i.test(desc) ? 'Alimentação' : 'Geral'));
+          var highConf = /SALARIO|SUPERMERCADO|IFOOD|UBER/i.test(desc);
+          parsed.push({
+            fingerprint: 'demo-pdf-' + Date.now() + '-' + idx,
+            date: isoDate,
+            description: desc,
+            amount: amount,
+            type: isIncome ? 'INCOME' : 'EXPENSE',
+            suggested_category_name: suggestedName,
+            confidence_score: highConf ? 0.91 : 0.72,
+            needs_review: !highConf,
+            selected: true
+          });
+        });
+
+        return parsed;
+      }
+
+      var pdfFileInputEl = document.getElementById('pdf-file-input');
+      var pdfFileStatusEl = document.getElementById('pdf-file-status');
+      if (pdfFileInputEl && pdfFileStatusEl) {
+        pdfFileInputEl.addEventListener('change', function () {
+          var file = pdfFileInputEl.files && pdfFileInputEl.files[0];
+          if (!file) {
+            pdfFileStatusEl.textContent = 'Nenhum arquivo selecionado (máximo 5 MB).';
+            return;
+          }
+          var sizeKb = Math.max(1, Math.round(file.size / 1024));
+          if (file.size > MAX_PDF_UPLOAD_BYTES) {
+            pdfFileStatusEl.textContent = 'Arquivo "' + file.name + '" excede 5 MB (' + sizeKb + ' KB). Selecione um arquivo menor.';
+            showToast('O arquivo PDF excede o limite de 5 MB.', 'error');
+            return;
+          }
+          pdfFileStatusEl.textContent = 'Arquivo selecionado: ' + file.name + ' (' + sizeKb + ' KB)';
+        });
+      }
+
+      var pdfDemoSampleBtn = document.getElementById('pdf-demo-sample-btn');
+      if (pdfDemoSampleBtn) {
+        pdfDemoSampleBtn.addEventListener('click', function () {
+          var rawTextArea = document.getElementById('pdf-raw-text-input');
+          var rawTextToggle = document.querySelector('[data-testid="pdf-manual-text-toggle"]');
+          var yearInput = document.getElementById('pdf-reference-year');
+          var refYear = yearInput ? Number(yearInput.value) || 2026 : 2026;
+
+          if (rawTextArea) {
+            rawTextArea.value = SAMPLE_EXTRACTED_RAW_TEXT;
+          }
+          if (rawTextToggle) {
+            rawTextToggle.open = true;
+          }
+
+          if (state.isDemo || !state.token) {
+            state.pdfImport.transactions = parseDemoStatementLines(SAMPLE_EXTRACTED_RAW_TEXT, refYear);
+            renderPdfReconcileSection();
+            showToast('Extrato de exemplo carregado para conciliação!');
+          } else {
+            showToast('Texto de exemplo preenchido! Clique em "Extrair transações do PDF" para processar via API.');
+          }
+        });
+      }
+
+      var pdfReconcileListEl = document.querySelector('[data-testid="pdf-reconcile-list"]');
+      if (pdfReconcileListEl) {
+        pdfReconcileListEl.addEventListener('change', function (e) {
+          var idxAttr = e.target && e.target.getAttribute('data-row-index');
+          if (idxAttr === null) return;
+          var idx = Number(idxAttr);
+          var rows = state.pdfImport && state.pdfImport.transactions;
+          if (!Array.isArray(rows) || !rows[idx]) return;
+
+          if (e.target.classList.contains('pdf-row-checkbox')) {
+            rows[idx].selected = Boolean(e.target.checked);
+            updatePdfSelectionCounter();
+          } else if (e.target.classList.contains('pdf-category-select')) {
+            rows[idx].category_id = e.target.value || null;
+            rows[idx]._categoryExplicit = true;
+          }
+        });
+
+        pdfReconcileListEl.addEventListener('input', function (e) {
+          if (!e.target || !e.target.classList.contains('pdf-desc-input')) return;
+          var idx = Number(e.target.getAttribute('data-row-index'));
+          var rows = state.pdfImport && state.pdfImport.transactions;
+          if (Array.isArray(rows) && rows[idx]) {
+            rows[idx].description = e.target.value;
+          }
+        });
+      }
+
+      var pdfUploadForm = document.getElementById('pdf-upload-form');
+      if (pdfUploadForm) {
+        pdfUploadForm.addEventListener('submit', async function (e) {
+          e.preventDefault();
+          if (state.pdfImport.isParsing) return;
+
+          var file = pdfFileInputEl && pdfFileInputEl.files && pdfFileInputEl.files[0];
+          var docTypeEl = document.getElementById('pdf-document-type');
+          var yearEl = document.getElementById('pdf-reference-year');
+          var rawTextEl = document.getElementById('pdf-raw-text-input');
+          var parseBtn = document.getElementById('pdf-parse-btn');
+
+          var docType = docTypeEl ? docTypeEl.value : 'AUTO';
+          var refYear = yearEl && yearEl.value ? Number(yearEl.value) : new Date().getFullYear();
+          var rawText = rawTextEl && rawTextEl.value ? rawTextEl.value.trim() : '';
+
+          if (!file && !rawText) {
+            showToast('Selecione um arquivo PDF ou cole as linhas do extrato.', 'error');
+            return;
+          }
+
+          state.pdfImport.isParsing = true;
+          if (parseBtn) {
+            parseBtn.disabled = true;
+            parseBtn.textContent = 'Extraindo transações...';
+          }
+
+          try {
+            if (!state.isDemo && state.token) {
+              var pdfBase64 = file ? await readPdfFileAsBase64(file) : '';
+              var parsePayload = {
+                document_type: docType,
+                reference_year: refYear
+              };
+              if (pdfBase64) parsePayload.pdf_base64 = pdfBase64;
+              if (rawText) parsePayload.raw_text = rawText;
+              if (file && file.name) parsePayload.file_name = file.name.slice(0, 120);
+
+              var parseRes = await fetch('/api/transactions/parse-pdf', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Authorization': 'Bearer ' + state.token
+                },
+                body: JSON.stringify(parsePayload)
+              });
+
+              if (parseRes.status === 401) {
+                handleLogout('expired');
+                return;
+              }
+
+              var parseBody = await parseRes.json().catch(function () { return {}; });
+              if (!parseRes.ok || parseBody.status === 'error') {
+                showToast(parseBody.message || 'Falha ao processar o PDF enviado.', 'error');
+                return;
+              }
+
+              var extractedData = parseBody.data || {};
+              var apiRows = Array.isArray(extractedData.transactions) ? extractedData.transactions : [];
+              state.pdfImport.fileName = extractedData.file_name || (file && file.name) || 'extrato.pdf';
+              state.pdfImport.documentType = extractedData.document_type || docType;
+              state.pdfImport.transactions = apiRows.map(function (tx, i) {
+                return Object.assign({}, tx, {
+                  fingerprint: tx.fingerprint || ('api-pdf-' + Date.now() + '-' + i),
+                  category_id: resolvePdfRowCategoryId(tx) || null,
+                  selected: true
+                });
+              });
+
+              renderPdfReconcileSection();
+              if (state.pdfImport.transactions.length === 0) {
+                showToast('Nenhuma linha transacional encontrada no PDF. Tente colar o texto manualmente.', 'error');
+              } else {
+                showToast(state.pdfImport.transactions.length + ' transações extraídas para conciliação!');
+              }
+            } else {
+              var demoRows = rawText ? parseDemoStatementLines(rawText, refYear) : parseDemoStatementLines(SAMPLE_EXTRACTED_RAW_TEXT, refYear);
+              state.pdfImport.fileName = (file && file.name) || 'demo-extrato.pdf';
+              state.pdfImport.documentType = docType;
+              state.pdfImport.transactions = demoRows;
+              renderPdfReconcileSection();
+              showToast('Modo Demo: ' + demoRows.length + ' transações prontas para conciliação!');
+            }
+          } catch (err) {
+            showToast((err && err.message) || 'Erro ao ler ou processar o arquivo PDF.', 'error');
+          } finally {
+            state.pdfImport.isParsing = false;
+            if (parseBtn) {
+              parseBtn.disabled = false;
+              parseBtn.textContent = 'Extrair transações do PDF';
+            }
+          }
+        });
+      }
+
+      var pdfBatchConfirmBtn = document.querySelector('[data-testid="pdf-batch-confirm-btn"]');
+      if (pdfBatchConfirmBtn) {
+        pdfBatchConfirmBtn.addEventListener('click', async function () {
+          if (state.pdfImport.isSubmitting) return;
+          var rows = (state.pdfImport && Array.isArray(state.pdfImport.transactions))
+            ? state.pdfImport.transactions
+            : [];
+          var selectedRows = rows.filter(function (tx) { return tx.selected !== false; });
+
+          if (selectedRows.length === 0) {
+            showToast('Selecione ao menos uma transação para importação em lote.', 'error');
+            return;
+          }
+
+          var batchItems = selectedRows.map(function (tx) {
+            var rawCatId = tx.category_id ? String(tx.category_id).trim() : '';
+            var validCategoryId = rawCatId && PDF_UUID_REGEX.test(rawCatId) ? rawCatId : null;
+            return {
+              amount: Number((Number(tx.amount) || 0).toFixed(2)),
+              date: String(tx.date || '').trim(),
+              category_id: validCategoryId,
+              description: tx.description ? String(tx.description).trim().slice(0, 255) : null,
+              is_automated: true
+            };
+          });
+
+          state.pdfImport.isSubmitting = true;
+          pdfBatchConfirmBtn.disabled = true;
+          pdfBatchConfirmBtn.textContent = 'Importando lote...';
+
+          try {
+            if (!state.isDemo && state.token) {
+              var batchRes = await fetch('/api/transactions/batch', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Authorization': 'Bearer ' + state.token
+                },
+                body: JSON.stringify({ transactions: batchItems })
+              });
+
+              if (batchRes.status === 401) {
+                handleLogout('expired');
+                return;
+              }
+
+              var batchBody = await batchRes.json().catch(function () { return {}; });
+              if (!batchRes.ok || batchBody.status === 'error') {
+                showToast(batchBody.message || 'Erro ao confirmar importação em lote na API.', 'error');
+                return;
+              }
+
+              var createdList = Array.isArray(batchBody.data) ? batchBody.data : [];
+              var normalizedCreated = createdList.map(function (created, idx) {
+                var originTx = selectedRows[idx] || {};
+                var matchedCat = created.category || created.categories ||
+                  state.categories.find(function (c) { return c.id === created.category_id; }) ||
+                  { name: originTx.suggested_category_name || 'Geral', type: originTx.type || 'EXPENSE' };
+                return Object.assign({}, created, {
+                  amount: Number(created.amount) || 0,
+                  category: matchedCat,
+                  categories: matchedCat
+                });
+              });
+
+              state.transactions = normalizedCreated.concat(state.transactions);
+              state.pdfImport.transactions = [];
+              recalculateAndRender({ rebuildLists: true });
+              showToast(normalizedCreated.length + ' transações importadas com sucesso!');
+            } else {
+              var demoCreated = selectedRows.map(function (tx, idx) {
+                var matchedCat = state.categories.find(function (c) { return c.id === tx.category_id; }) ||
+                  { name: tx.suggested_category_name || 'Geral', type: tx.type || 'EXPENSE' };
+                return {
+                  id: 'tx-pdf-' + Date.now() + '-' + idx,
+                  amount: Number((Number(tx.amount) || 0).toFixed(2)),
+                  date: tx.date,
+                  description: tx.description || 'Importado via PDF',
+                  category_id: matchedCat.id || null,
+                  category: matchedCat,
+                  categories: matchedCat,
+                  is_automated: true
+                };
+              });
+
+              state.transactions = demoCreated.concat(state.transactions);
+              state.pdfImport.transactions = [];
+              recalculateAndRender({ rebuildLists: true });
+              showToast(demoCreated.length + ' transações importadas no Modo Demo!');
+            }
+          } catch (err) {
+            showToast('Falha de conexão ao importar lote de transações.', 'error');
+          } finally {
+            state.pdfImport.isSubmitting = false;
+            pdfBatchConfirmBtn.textContent = 'Confirmar importação em lote';
+            updatePdfSelectionCounter();
+          }
+        });
+      }
 
       // Carrega automaticamente os dados reais do Supabase se a sessão for autenticada
       if (!state.isDemo && state.token) {

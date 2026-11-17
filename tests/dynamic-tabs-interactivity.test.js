@@ -1,3 +1,4 @@
+const vm = require('vm');
 const { renderAppPage } = require('../src/frontend/pages/renderAppPage');
 const { renderCashflowViewMarkup } = require('../src/frontend/components/CashflowView');
 const { renderPortfolioViewMarkup } = require('../src/frontend/components/PortfolioView');
@@ -147,7 +148,7 @@ describe('E06.T02 — Ativação Funcional de Todos os Botões, Header, Sidebar 
     expect(markup).toContain('data-testid="settings-logout-btn"');
   });
 
-  test('5. InboxView: renderiza interface mobile-first de upload, conciliação e confirmação em lote de PDF', () => {
+  test('5. InboxView: renderiza interface mobile-first de upload, conciliação, confirmação em lote de PDF e status das automações', () => {
     const markup = renderInboxViewMarkup();
 
     expect(markup).toContain('data-testid="inbox-view"');
@@ -155,15 +156,39 @@ describe('E06.T02 — Ativação Funcional de Todos os Botões, Header, Sidebar 
     expect(markup).toContain('data-testid="inbox-alert-burn-rate"');
     expect(markup).toContain('data-testid="inbox-alert-quotes-sync"');
     expect(markup).toContain('data-testid="inbox-alert-notion-sync"');
+    expect(markup).toContain('data-testid="inbox-automations-card"');
+    expect(markup).toContain('Notion Sync Worker');
+    expect(markup).toContain('CodeQL SAST');
+    expect(markup).toContain('Extrator de Faturas PDF');
     expect(markup).toContain('data-testid="pdf-upload-form"');
+    expect(markup).toContain('data-testid="pdf-document-type"');
+    expect(markup).toContain('data-testid="pdf-reference-year"');
     expect(markup).toContain('data-testid="pdf-file-input"');
+    expect(markup).toContain('data-testid="pdf-raw-text-input"');
     expect(markup).toContain('data-testid="pdf-parse-btn"');
+    expect(markup).toContain('data-testid="pdf-demo-sample-btn"');
     expect(markup).toContain('data-testid="pdf-reconcile-summary"');
     expect(markup).toContain('data-testid="pdf-reconcile-list"');
+    expect(markup).toContain('data-testid="pdf-selected-count"');
     expect(markup).toContain('data-testid="pdf-batch-confirm-btn"');
     expect(markup).toContain('min-height: 44px; min-width: 44px;');
     expect(markup).toContain('min-height: 48px; min-width: 48px;');
     expect(markup).toContain('env(safe-area-inset-bottom, 0px)');
+
+    const withCatsMarkup = renderInboxViewMarkup({
+      categories: mockCategories
+    });
+    expect(withCatsMarkup).toContain('value="cat-sal"');
+    expect(withCatsMarkup).toContain('data-testid="pdf-select-tx-tx-preview-1"');
+    expect(withCatsMarkup).toContain('data-testid="pdf-desc-input-tx-preview-1"');
+
+    const emptyMarkup = renderInboxViewMarkup({
+      categories: mockCategories,
+      extractedTransactions: []
+    });
+    expect(emptyMarkup).toContain('data-testid="pdf-reconcile-empty"');
+    expect(emptyMarkup).toContain('0 selecionada(s) para importação');
+    expect(emptyMarkup).toContain('disabled');
   });
 
   test('6. Runtime interativo do cliente possui manipuladores para botões de header, sidebar, refresh com spin e troca de abas', () => {
@@ -181,5 +206,25 @@ describe('E06.T02 — Ativação Funcional de Todos os Botões, Header, Sidebar 
     expect(html).toContain('showToast');
     expect(html).toContain('handleLogout');
     expect(html).toContain('localStorage.setItem(\'pc_theme\'');
+  });
+
+  test('7. Runtime SPA compila sem erros de sintaxe e integra upload, conciliação e batch de PDF com a API (E07.T02)', () => {
+    const html = renderAppPage();
+
+    // Valida sintaxe do bloco <script> interativo gerado pelo renderAppPage
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+    expect(scripts.length).toBeGreaterThanOrEqual(2);
+    const runtimeScript = scripts[scripts.length - 1][1];
+    expect(() => new vm.Script(runtimeScript)).not.toThrow();
+
+    // Presença dos manipuladores e endpoints da E07.T02 no script compilado
+    expect(runtimeScript).toContain('renderPdfReconcileSection');
+    expect(runtimeScript).toContain('readPdfFileAsBase64');
+    expect(runtimeScript).toContain('FileReader');
+    expect(runtimeScript).toContain('/api/transactions/parse-pdf');
+    expect(runtimeScript).toContain('/api/transactions/batch');
+    expect(runtimeScript).toContain('pdf-upload-form');
+    expect(runtimeScript).toContain('pdf-batch-confirm-btn');
+    expect(runtimeScript).toContain('is_automated: true');
   });
 });
