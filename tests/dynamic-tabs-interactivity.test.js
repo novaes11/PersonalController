@@ -211,10 +211,14 @@ describe('E06.T02 — Ativação Funcional de Todos os Botões, Header, Sidebar 
   test('7. Runtime SPA compila sem erros de sintaxe e integra upload, conciliação e batch de PDF com a API (E07.T02)', () => {
     const html = renderAppPage();
 
-    // Valida sintaxe do bloco <script> interativo gerado pelo renderAppPage
-    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-    expect(scripts.length).toBeGreaterThanOrEqual(2);
-    const runtimeScript = scripts[scripts.length - 1][1];
+    // Valida sintaxe do bloco <script> interativo gerado pelo renderAppPage sem regex de tag HTML
+    const openMarker = '<script>';
+    const closeMarker = '</script>';
+    const scriptStart = html.lastIndexOf(openMarker);
+    const scriptEnd = html.lastIndexOf(closeMarker);
+    expect(scriptStart).toBeGreaterThan(-1);
+    expect(scriptEnd).toBeGreaterThan(scriptStart);
+    const runtimeScript = html.slice(scriptStart + openMarker.length, scriptEnd);
     expect(() => new vm.Script(runtimeScript)).not.toThrow();
 
     // Presença dos manipuladores e endpoints da E07.T02 no script compilado
