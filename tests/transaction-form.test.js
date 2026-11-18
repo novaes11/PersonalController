@@ -1,7 +1,10 @@
 const {
   buildTransactionPayload,
+  buildParsePdfPayload,
   fetchCategories,
-  submitTransaction
+  submitTransaction,
+  parsePdfTransactions,
+  submitBatchTransactions
 } = require('../src/frontend/services/transactionsApi');
 
 const {
@@ -10,7 +13,11 @@ const {
   createTransactionFormController
 } = require('../src/frontend/components/TransactionForm');
 
-const { createTransactionSchema } = require('../src/schemas/transactions.schema');
+const {
+  createTransactionSchema,
+  parsePdfStatementSchema,
+  batchCreateTransactionsSchema
+} = require('../src/schemas/transactions.schema');
 
 const mockCategories = [
   {
@@ -257,6 +264,181 @@ describe('Formulário de Input Manual de Transação (E04.T01)', () => {
           { token: 'jwt_token_valido', fetchImpl: mockFetch } // allowlist-secret
         )
       ).rejects.toThrow('Dados inválidos para criação da transação');
+    });
+  });
+
+  describe('Interface de Upload e Confirmação em Lote de PDF (E07.T02)', () => {
+    it('deve construir payload estrito do parser PDF removendo prefixo DataURL, limitando file_name e compatível com parsePdfStatementSchema', () => {
+      const longFileName = `${'extrato_inter_'.repeat(12)}.pdf`;
+      const result = buildParsePdfPayload({
+        pdf_base64: 'data:application/pdf;base64,BASE64DATA',
+        file_name: longFileName,
+        document_type: 'bank_statement',
+        reference_year: '2026',
+        user_id: '99999999-9999-4999-a999-999999999999'
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.payload).toEqual({
+        pdf_base64: 'BASE64DATA',
+        file_name: longFileName.slice(0, 120),
+        document_type: 'BANK_STATEMENT',
+        reference_year: 2026
+      });
+      expect(result.payload.user_id).toBeUndefined();
+      expect(parsePdfStatementSchema.safeParse(result.payload).success).toBe(true);
+    });
+
+    it('deve aceitar fallback com raw_text sem pdf_base64 e rejeitar entrada vazia', () => {
+      const rawOnly = buildParsePdfPayload({
+        raw_text: '07/11/2026 SUPERMERCADO CENTRAL -248,90',
+        document_type: 'AUTO'
+      });
+      expect(rawOnly.valid).toBe(true);
+      expect(rawOnly.payload.raw_text).toBe('07/11/2026 SUPERMERCADO CENTRAL -248,90');
+
+      const empty = buildParsePdfPayload({});
+      expect(empty.valid).toBe(false);
+    });
+
+    it('deve enviar POST /api/transactions/parse-pdf autenticado com Bearer token e retornar transações extraídas', async () => {
+      const mockFetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          status: 'ok',
+          data: {
+            transactions: [
+              {
+                date: '2026-11-07',
+                amount: 248.9,
+                type: 'EXPENSE',
+                description: 'SUPERMERCADO CENTRAL'
+              }
+            ],
+            summary: { total_extracted: 1, review_required_count: 0 }
+          }
+        })
+      });
+
+      const result = await parsePdfTransactions(
+        {
+          pdf_base64: 'BASE64DATA',
+          document_type: 'BANK_STATEMENT'
+        },
+        {
+          token: 'jwt_token_valido', // allowlist-secret
+          baseUrl: '/api',
+          fetchImpl: mockFetch
+        }
+      );
+
+      expect(result.transactions).toHaveLength(1);
+      const [parseUrl, parseOptions] = mockFetch.mock.calls[0];
+      expect(parseUrl).toBe('/api/transactions/parse-pdf');
+      expect(parseOptions).toMatchObject({
+        method: 'POST',
+        body: JSON.stringify({
+          pdf_base64: 'BASE64DATA',
+          document_type: 'BANK_STATEMENT'
+        })
+      });
+      expect(parseOptions.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: 'Bearer jwt_token_valido' // allowlist-secret
+      });
+    });
+
+    it('deve enviar POST /api/transactions/batch com is_automated=true, normalizar category_id não-UUID para null e validar contra batchCreateTransactionsSchema', async () => {
+      const mockFetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({
+          status: 'ok',
+          count: 2,
+          data: [
+            {
+              id: '99999999-9999-4999-a999-999999999999',
+              amount: 248.9,
+              date: '2026-11-07',
+              description: 'SUPERMERCADO CENTRAL',
+              category_id: '55555555-5555-4555-a555-555555555555',
+              is_automated: true
+            },
+            {
+              id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              amount: 32.5,
+              date: '2026-11-08',
+              description: 'UBER *TRIP 3321',
+              category_id: null,
+              is_automated: true
+            }
+          ]
+        })
+      });
+
+      const result = await submitBatchTransactions(
+        [
+          {
+            amount: '248.90',
+            date: '2026-11-07',
+            description: 'SUPERMERCADO CENTRAL',
+            category_id: '55555555-5555-4555-a555-555555555555',
+            fingerprint: 'deve-ser-ignorado'
+          },
+          {
+            amount: 32.5,
+            date: '2026-11-08',
+            description: 'UBER *TRIP 3321',
+            category_id: 'Transporte (nome sem UUID)'
+          }
+        ],
+        {
+          token: 'jwt_token_valido', // allowlist-secret
+          baseUrl: '/api',
+          fetchImpl: mockFetch
+        }
+      );
+
+      expect(result).toHaveLength(2);
+      const [batchUrl, batchOptions] = mockFetch.mock.calls[0];
+      expect(batchUrl).toBe('/api/transactions/batch');
+
+      const sentBody = JSON.parse(batchOptions.body);
+      expect(sentBody).toEqual({
+        transactions: [
+          {
+            amount: 248.9,
+            date: '2026-11-07',
+            category_id: '55555555-5555-4555-a555-555555555555',
+            description: 'SUPERMERCADO CENTRAL',
+            is_automated: true
+          },
+          {
+            amount: 32.5,
+            date: '2026-11-08',
+            category_id: null,
+            description: 'UBER *TRIP 3321',
+            is_automated: true
+          }
+        ]
+      });
+
+      // Valida estritamente contra o schema Zod do backend (.strict())
+      expect(batchCreateTransactionsSchema.safeParse(sentBody).success).toBe(true);
+    });
+
+    it('deve tratar respostas HTTP de erro sem JSON válido no parse/batch de PDF', async () => {
+      const errorFetch = jest.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: () => Promise.reject(new SyntaxError('Unexpected token <'))
+      });
+
+      await expect(
+        parsePdfTransactions({ raw_text: '05/11/2026 IFOOD -45,90' }, { fetchImpl: errorFetch })
+      ).rejects.toThrow('Erro ao processar PDF (HTTP 502)');
     });
   });
 });
