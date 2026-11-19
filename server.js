@@ -4,6 +4,8 @@ const cors = require('cors');
 const { authRateLimiter, apiRateLimiter } = require('./src/middlewares/rateLimit.middleware');
 const { renderAppPage } = require('./src/frontend/pages/renderAppPage');
 const { renderLandingPage } = require('./src/frontend/pages/renderLandingPage');
+const { openApiSpec } = require('./src/docs/swagger');
+const { renderSwaggerUiHtml } = require('./src/docs/swaggerHtml');
 
 const app = express();
 
@@ -159,6 +161,24 @@ router.get('/', apiRateLimiter, (req, res) => {
 
 router.get('/health', (req, res) => {
   res.status(200).json({ status: "ok", "pipeline": "running" });
+});
+
+// Documentação interativa OpenAPI 3.0 & Swagger UI (DX-01)
+const isSwaggerEnabled = () => process.env.SWAGGER_ENABLED !== 'false';
+
+router.get('/docs.json', apiRateLimiter, (req, res, next) => {
+  if (!isSwaggerEnabled()) return next();
+  return res.status(200).json(openApiSpec);
+});
+
+router.get(['/docs', '/docs/'], apiRateLimiter, (req, res, next) => {
+  if (!isSwaggerEnabled()) return next();
+  const isApiPrefix = Boolean(
+    (req.baseUrl && req.baseUrl.startsWith('/api')) ||
+    (req.originalUrl && req.originalUrl.startsWith('/api'))
+  );
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  return res.status(200).send(renderSwaggerUiHtml({ isApiPrefix }));
 });
 
 // Sub-rotas da aplicação com proteção de Rate Limiting (SEC-05)
